@@ -10,11 +10,17 @@ import org.jsoup.nodes.Element
 import org.jsoup.Jsoup
 
 class OppadramaProvider : MainAPI() {
-    override var mainUrl = "http://45.11.57.192" // Pastikan IP/URL ini yang paling terkini
+    override var mainUrl = "http://45.11.57.192"
     override var name = "OppaDrama"
     override val hasMainPage = true
     override var lang = "id"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
+
+    // Melepasi sekatan server dengan menetapkan Header User-Agent Browser
+    private val defaultHeaders = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer" to "$mainUrl/"
+    )
 
     companion object {
         fun getStatus(t: String): ShowStatus {
@@ -47,22 +53,17 @@ class OppadramaProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        // Pembaikan Struktur Pagination untuk Tema Wp-Manga / Themesia
-        val pageUrl = if (page == 1) {
+        val pageUrl = if (page <= 1) {
             "$mainUrl/${request.data}"
         } else {
-            if (request.data.contains("?")) {
-                val parts = request.data.split("?", limit = 2)
-                "$mainUrl/${parts[0]}page/$page/?${parts.getOrNull(1) ?: ""}"
-            } else {
-                "$mainUrl/${request.data.removeSuffix("/")}/page/$page/"
-            }
+            "$mainUrl/${request.data}&page=$page"
         }
 
-        val document = app.get(pageUrl).document
+        // Hantar request dengan headers
+        val res = app.get(pageUrl, headers = defaultHeaders)
+        val document = res.document
         
-        // CSS Selector Diluaskan untuk menangkap pelbagai bentuk grid
-        val items = document.select("div.listupd article, div.listupd div.bs, div.post-item, div.item, article.item, div.box-item")
+        val items = document.select("div.listupd article.bs, div.listupd div.bs, div.bs")
                             .mapNotNull { it.toSearchResult() }
 
         return newHomePageResponse(HomePageList(request.name, items), hasNext = items.isNotEmpty())
@@ -72,58 +73,53 @@ class OppadramaProvider : MainAPI() {
         val linkElement = this.selectFirst("a") ?: return null
         val href = fixUrl(linkElement.attr("href"))
         
-        // Pembaikan tangkapan Tajuk (Title) - lebih fleksibel
-        var title = linkElement.attr("title")
-        if (title.isNullOrBlank()) {
-            title = this.selectFirst("div.tt, div.title, h2, h3, .ep_title")?.text() ?: ""
-        }
-        if (title.isBlank()) title = linkElement.text()
-        if (title.isBlank()) return null // Gugurkan jika masih tiada tajuk
+        val title = this.selectFirst("div.tt, div.title, h2")?.text()?.trim()
+            ?: linkElement.attr("title").trim()
+            if (title.isBlank()) return null
 
         val poster = this.selectFirst("img")?.getImageAttr()?.let { fixUrlNull(it) }
         
-        val typeText = this.selectFirst("div.typez, span.type, .status")?.text()?.lowercase() ?: ""
+        val typeText = this.selectFirst("div.typez, span.type")?.text()?.lowercase() ?: ""
         val isMovie = typeText.contains("movie") || href.contains("/movie/", true)
 
         return if (isMovie) {
-            newMovieSearchResponse(title.trim(), href, TvType.Movie) {
+            newMovieSearchResponse(title, href, TvType.Movie) {
                 this.posterUrl = poster
             }
         } else {
-            newTvSeriesSearchResponse(title.trim(), href, TvType.TvSeries) {
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
                 this.posterUrl = poster
             }
         }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = app.get("$mainUrl/?s=$query").document
-        return document.select("div.listupd article, div.listupd div.bs, div.post-item, div.item, article.item")
+        val document = app.get("$mainUrl/?s=$query", headers = defaultHeaders).document
+        return document.select("div.listupd article.bs, div.listupd div.bs, div.bs")
             .mapNotNull { it.toSearchResult() }
     }
 
     private fun Element.toRecommendResult(): SearchResponse? {
         val linkElement = this.selectFirst("a") ?: return null
         val href = fixUrl(linkElement.attr("href"))
-        
-        var title = this.selectFirst("div.tt, div.title")?.text()
-        if (title.isNullOrBlank()) title = linkElement.attr("title")
-        if (title.isNullOrBlank()) return null
+        val title = this.selectFirst("div.tt, div.title")?.text()?.trim() 
+            ?: linkElement.attr("title").trim()
+            if (title.isBlank()) return null
 
         val posterUrl = this.selectFirst("img")?.getImageAttr()?.let { fixUrlNull(it) }
         
-        return newMovieSearchResponse(title.trim(), href, TvType.Movie) {
+        return newMovieSearchResponse(title, href, TvType.Movie) {
             this.posterUrl = posterUrl
         }
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url).document
+        val document = app.get(url, headers = defaultHeaders).document
 
-        val title = document.selectFirst("h1.entry-title, h1.tit, h1[itemprop=name]")?.text()?.trim().orEmpty()
-        val poster = document.selectFirst("div.bigcontent img, div.thumb img, div.poster img")?.getImageAttr()?.let { fixUrlNull(it) }
+        val title = document.selectFirst("h1.entry-title, h1.tit")?.text()?.trim().orEmpty()
+        val poster = document.selectFirst("div.bigcontent img, div.thumb img")?.getImageAttr()?.let { fixUrlNull(it) }
         
-        val description = document.select("div.entry-content p, div.desc p, div.mindes p")
+        val description = document.select("div.entry-content p, div.desc p")
             .joinToString("\n") { it.text() }
             .trim()
 
@@ -136,12 +132,12 @@ class OppadramaProvider : MainAPI() {
             if (h == 0 && m == 0) it.filter { c -> c.isDigit() }.toIntOrNull() else h * 60 + m
         }
 
-        val tags = document.select("div.genxed a, div.genre a, .sgen a").map { it.text() }
+        val tags = document.select("div.genxed a, div.genre a").map { it.text() }
 
-        val actors = document.select("span:has(b:matchesOwn((?i)Artis|Cast:)) a, div.cast a, .actor a")
+        val actors = document.select("span:has(b:matchesOwn((?i)Artis|Cast:)) a, div.cast a")
             .map { it.text().trim() }
 
-        val rating = document.selectFirst("div.rating strong, span[itemprop=ratingValue], .numrating")
+        val rating = document.selectFirst("div.rating strong, span[itemprop=ratingValue]")
             ?.text()
             ?.replace("Rating", "")
             ?.trim()
@@ -156,16 +152,16 @@ class OppadramaProvider : MainAPI() {
             ?: ""
         val status = getStatus(statusText)
 
-        val recommendations = document.select("div.listupd article, div.listupd div.bs, div.post-item")
+        val recommendations = document.select("div.listupd article.bs, div.listupd div.bs")
             .mapNotNull { it.toRecommendResult() }
 
-        val episodeElements = document.select("div.eplister ul li a, div.episodelist ul li a")
+        val episodeElements = document.select("div.eplister ul li a")
 
         val episodes = episodeElements
             .reversed()
             .mapIndexed { index, aTag ->
                 val href = fixUrl(aTag.attr("href"))
-                val epName = aTag.selectFirst("div.epl-num, .epl-title")?.text() ?: "Episode ${index + 1}"
+                val epName = aTag.selectFirst("div.epl-num")?.text() ?: "Episode ${index + 1}"
 
                 newEpisode(href) {
                     this.name = epName
@@ -207,17 +203,17 @@ class OppadramaProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val document = app.get(data).document
+        val document = app.get(data, headers = defaultHeaders).document
 
-        document.selectFirst("div.player-embed iframe, div.embed-container iframe, div.megamenu iframe")
+        document.selectFirst("div.player-embed iframe, div.embed-container iframe")
             ?.getIframeAttr()
             ?.let { iframe ->
                 loadExtractor(httpsify(iframe), data, subtitleCallback, callback)
             }
 
-        val mirrorOptions = document.select("select.mirror option[value]:not([disabled]), ul.mirrors li a")
+        val mirrorOptions = document.select("select.mirror option[value]:not([disabled])")
         for (opt in mirrorOptions) {
-            val base64 = opt.attr("value").ifBlank { opt.attr("data-url") }
+            val base64 = opt.attr("value")
             if (base64.isBlank()) continue
             try {
                 val cleaned = base64.replace("\\s".toRegex(), "")
@@ -226,13 +222,13 @@ class OppadramaProvider : MainAPI() {
                 val mirrorUrl = when {
                     iframeTag?.attr("src")?.isNotBlank() == true -> iframeTag.attr("src")
                     iframeTag?.attr("data-src")?.isNotBlank() == true -> iframeTag.attr("data-src")
-                    else -> decodedHtml // In case it's a direct link decoded
+                    else -> null
                 }
                 if (!mirrorUrl.isNullOrBlank()) {
                     loadExtractor(httpsify(mirrorUrl), data, subtitleCallback, callback)
                 }
             } catch (_: Exception) {
-                // Abaikan jika tak berjaya decode
+                // Ignore
             }
         }
 
@@ -247,12 +243,12 @@ class OppadramaProvider : MainAPI() {
         return true
     }
 
-    private fun Element.getImageAttr(): String {
+    private fun Element.getImageAttr(): String? {
         return when {
             this.hasAttr("data-src") -> this.attr("abs:data-src")
             this.hasAttr("data-lazy-src") -> this.attr("abs:data-lazy-src")
-            this.hasAttr("srcset") -> this.attr("abs:srcset").substringBefore(" ")
-            else -> this.attr("abs:src")
+            this.hasAttr("src") -> this.attr("abs:src")
+            else -> null
         }
     }
 
