@@ -13,7 +13,7 @@ class PencurimovieProvider : MainAPI() {
     companion object {
         var context: android.content.Context? = null
     }
-    override var mainUrl = "https://ww99.pencurimovie.bond"
+    override var mainUrl = "https://ww21.pencurimovie.sbs"
     override var name = "PencuriMovie"
     override val hasMainPage = true
     override var lang = "id"
