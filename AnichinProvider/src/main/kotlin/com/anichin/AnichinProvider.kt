@@ -127,7 +127,7 @@ val realUrl = streamDoc.select("iframe").attr("src")
 
 if (realUrl.isNotBlank()) {
     loadExtractor(realUrl, subtitleCallback, callback)
-}
+
             }
         }
         return true
