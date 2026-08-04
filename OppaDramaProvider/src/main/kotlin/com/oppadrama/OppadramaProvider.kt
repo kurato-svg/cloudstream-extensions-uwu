@@ -2,7 +2,6 @@ package com.oppadrama
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
-import com.lagradost.cloudstream3.LoadResponse.Companion.addScore
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element
 
@@ -13,13 +12,12 @@ class OppadramaProvider : MainAPI() {
     override var lang = "id"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.AsianDrama)
 
-    // Set User-Agent wajib untuk elak sekatan pelayan IP
-    override val requestHeaders = mapOf(
+    // User-Agent disimpan dalam pembolehubah biasa untuk dipanggil semasa HTTP request
+    private val customHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Referer" to "$mainUrl/"
     )
 
-    // Simplified Clean URLs - Elakkan URL bercelaru yang buatkan server error
     override val mainPage = mainPageOf(
         "series/?order=update" to "Latest Update",
         "series/?country[]=china&order=update" to "Drama Chinese",
@@ -33,7 +31,6 @@ class OppadramaProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        // Bina URL yang betul mengikut sistem pagination WordPress/Themesia
         val cleanData = request.data.removePrefix("/")
         val pageUrl = if (page <= 1) {
             "$mainUrl/$cleanData"
@@ -43,14 +40,12 @@ class OppadramaProvider : MainAPI() {
         }
 
         return try {
-            val document = app.get(pageUrl, headers = requestHeaders).document
-            // Scraper yang paling stabil untuk tema Oppadrama
+            val document = app.get(pageUrl, headers = customHeaders).document
             val items = document.select(".listupd article.bs, .listupd .bs, article.bs")
                 .mapNotNull { it.toSearchResult() }
 
             newHomePageResponse(HomePageList(request.name, items), hasNext = items.isNotEmpty())
         } catch (e: Exception) {
-            // Mengelakkan app blank / crash jika satu-satu kategori gagal dimuat
             newHomePageResponse(HomePageList(request.name, emptyList()), hasNext = false)
         }
     }
@@ -59,14 +54,12 @@ class OppadramaProvider : MainAPI() {
         val aTag = this.selectFirst("a") ?: return null
         val href = fixUrl(aTag.attr("href"))
         
-        // Ambil tajuk dari attribute title atau div inner text
         val title = (aTag.attr("title").ifBlank { 
             this.selectFirst(".tt, .title, h2")?.text() 
         })?.trim() ?: return null
 
         if (title.isBlank()) return null
 
-        // Ambil imej poster dengan selamat
         val img = this.selectFirst("img")
         val posterUrl = img?.attr("abs:data-src")?.ifBlank { null }
             ?: img?.attr("abs:data-lazy-src")?.ifBlank { null }
@@ -88,13 +81,13 @@ class OppadramaProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
-        val document = app.get(url, headers = requestHeaders).document
+        val document = app.get(url, headers = customHeaders).document
         return document.select(".listupd article.bs, .listupd .bs")
             .mapNotNull { it.toSearchResult() }
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url, headers = requestHeaders).document
+        val document = app.get(url, headers = customHeaders).document
 
         val title = document.selectFirst("h1.entry-title")?.text()?.trim().orEmpty()
         val poster = document.selectFirst("div.bigcontent img, div.thumb img")?.attr("abs:src")
@@ -106,7 +99,6 @@ class OppadramaProvider : MainAPI() {
         val tags = document.select("div.genxed a").map { it.text() }
         val actors = document.select("span:has(b:matchesOwn((?i)Artis|Cast)) a").map { it.text().trim() }
 
-        // Senarai Episode
         val episodeElements = document.select("div.eplister ul li a")
         val episodes = episodeElements.reversed().mapIndexed { index, aTag ->
             val epHref = fixUrl(aTag.attr("href"))
@@ -142,9 +134,8 @@ class OppadramaProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val document = app.get(data, headers = requestHeaders).document
+        val document = app.get(data, headers = customHeaders).document
 
-        // Frame Video Utama
         document.selectFirst("div.player-embed iframe")?.attr("src")?.let { iframe ->
             loadExtractor(httpsify(iframe), data, subtitleCallback, callback)
         }
