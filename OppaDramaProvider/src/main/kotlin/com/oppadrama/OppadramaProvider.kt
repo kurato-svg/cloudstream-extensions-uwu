@@ -12,14 +12,13 @@ class OppadramaProvider : MainAPI() {
     override var lang = "id"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.AsianDrama)
 
-    // User-Agent disimpan dalam pembolehubah biasa untuk dipanggil semasa HTTP request
     private val customHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Referer" to "$mainUrl/"
     )
 
     override val mainPage = mainPageOf(
-        "series/?order=update" to "Latest Update",
+        "" to "Latest Update",
         "series/?country[]=china&order=update" to "Drama Chinese",
         "series/?country[]=japan&order=update" to "Drama Jepang",
         "series/?country[]=south-korea&order=update" to "Drama Korea",
@@ -31,18 +30,25 @@ class OppadramaProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val cleanData = request.data.removePrefix("/")
-        val pageUrl = if (page <= 1) {
-            "$mainUrl/$cleanData"
+        val pageUrl = if (request.data.isEmpty()) {
+            if (page <= 1) mainUrl else "$mainUrl/page/$page/"
         } else {
-            val separator = if (cleanData.contains("?")) "&" else "?"
-            "$mainUrl/$cleanData${separator}page=$page"
+            val cleanData = request.data.removePrefix("/")
+            if (page <= 1) {
+                "$mainUrl/$cleanData"
+            } else {
+                val separator = if (cleanData.contains("?")) "&" else "?"
+                "$mainUrl/$cleanData${separator}page=$page"
+            }
         }
 
         return try {
             val document = app.get(pageUrl, headers = customHeaders).document
-            val items = document.select(".listupd article.bs, .listupd .bs, article.bs")
+            
+            // Mengambil semua bekas kad item (sama ada di homepage slider, widget, atau listupd)
+            val items = document.select("div.listupd article.bs, div.listupd div.bs, div.bs, div.utao article, div.serieslist ul li")
                 .mapNotNull { it.toSearchResult() }
+                .distinctBy { it.url } // Hilangkan rekod berganda
 
             newHomePageResponse(HomePageList(request.name, items), hasNext = items.isNotEmpty())
         } catch (e: Exception) {
@@ -54,18 +60,20 @@ class OppadramaProvider : MainAPI() {
         val aTag = this.selectFirst("a") ?: return null
         val href = fixUrl(aTag.attr("href"))
         
-        val title = (aTag.attr("title").ifBlank { 
-            this.selectFirst(".tt, .title, h2")?.text() 
-        })?.trim() ?: return null
+        // Ambil tajuk dari pelbagai kemungkinan tag HTML
+        val title = (this.selectFirst(".tt, .title, h2, h3, .entry-title")?.text() 
+            ?: aTag.attr("title")).trim()
 
         if (title.isBlank()) return null
 
+        // Pengecaman imej poster yang menyeluruh (Lazy Load & Data Sources)
         val img = this.selectFirst("img")
         val posterUrl = img?.attr("abs:data-src")?.ifBlank { null }
             ?: img?.attr("abs:data-lazy-src")?.ifBlank { null }
+            ?: img?.attr("abs:srcset")?.split(" ")?.firstOrNull()
             ?: img?.attr("abs:src")
 
-        val typeStr = this.selectFirst(".typez, .type")?.text()?.lowercase() ?: ""
+        val typeStr = this.selectFirst(".typez, .type, .type-label")?.text()?.lowercase() ?: ""
         val isMovie = typeStr.contains("movie") || href.contains("/movie/", true)
 
         return if (isMovie) {
@@ -82,21 +90,24 @@ class OppadramaProvider : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url, headers = customHeaders).document
-        return document.select(".listupd article.bs, .listupd .bs")
+        return document.select("div.listupd article.bs, div.listupd div.bs, div.bs, div.utao article")
             .mapNotNull { it.toSearchResult() }
+            .distinctBy { it.url }
     }
 
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url, headers = customHeaders).document
 
-        val title = document.selectFirst("h1.entry-title")?.text()?.trim().orEmpty()
-        val poster = document.selectFirst("div.bigcontent img, div.thumb img")?.attr("abs:src")
-        val plot = document.select("div.entry-content p").joinToString("\n") { it.text() }.trim()
+        val title = document.selectFirst("h1.entry-title, h1.tit")?.text()?.trim().orEmpty()
+        val poster = document.selectFirst("div.bigcontent img, div.thumb img")?.let { img ->
+            img.attr("abs:data-src").ifBlank { null } ?: img.attr("abs:src")
+        }
+        val plot = document.select("div.entry-content p, div.desc p").joinToString("\n") { it.text() }.trim()
 
         val year = document.selectFirst("span:matchesOwn((?i)Dirilis|Released)")?.ownText()
             ?.filter { it.isDigit() }?.take(4)?.toIntOrNull()
 
-        val tags = document.select("div.genxed a").map { it.text() }
+        val tags = document.select("div.genxed a, div.genre a").map { it.text() }
         val actors = document.select("span:has(b:matchesOwn((?i)Artis|Cast)) a").map { it.text().trim() }
 
         val episodeElements = document.select("div.eplister ul li a")
@@ -136,7 +147,7 @@ class OppadramaProvider : MainAPI() {
     ): Boolean {
         val document = app.get(data, headers = customHeaders).document
 
-        document.selectFirst("div.player-embed iframe")?.attr("src")?.let { iframe ->
+        document.selectFirst("div.player-embed iframe, div.embed-container iframe")?.attr("src")?.let { iframe ->
             loadExtractor(httpsify(iframe), data, subtitleCallback, callback)
         }
 
