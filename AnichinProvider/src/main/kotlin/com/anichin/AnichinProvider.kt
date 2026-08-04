@@ -104,32 +104,32 @@ class AnichinProvider : MainAPI() {
     }
 
     override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        val document = app.get(fixUrl(data)).document
-        document.select(".mobius option").forEach { server ->
-            val base64 = server.attr("value")
-            if (base64.isNotBlank()) {
-                val decoded = base64Decode(base64)
-                val doc = Jsoup.parse(decoded)
-                val href = fixUrl(doc.select("iframe").attr("src"))
+    data: String,
+    isCasting: Boolean,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit
+): Boolean {
 
-val response = app.get(
-    href,
-    referer = data
-)
+    val document = app.get(fixUrl(data)).document
 
-val streamDoc = response.document
-val realUrl = streamDoc.select("iframe").attr("src")
+    document.select(".mobius option").forEach { server ->
+        val base64 = server.attr("value")
 
-if (realUrl.isNotBlank()) {
-    loadExtractor(realUrl, subtitleCallback, callback)
-}
-            }
+        println("SERVER = ${server.text()}")
+        println("BASE64 = $base64")
+
+        if (base64.isNotBlank()) {
+            val decoded = base64Decode(base64)
+            println("DECODED = $decoded")
+
+            val doc = Jsoup.parse(decoded)
+            val href = fixUrl(doc.select("iframe").attr("src"))
+
+            println("IFRAME = $href")
+
+            loadExtractor(href, subtitleCallback, callback)
         }
-        return true
     }
-}
+
+    return true
+    }
