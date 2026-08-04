@@ -4,30 +4,19 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors  
 import com.lagradost.cloudstream3.LoadResponse.Companion.addScore  
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer  
-import com.lagradost.cloudstream3.MainAPI  
-import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.base64Decode 
-import com.lagradost.cloudstream3.TvType  
-import com.lagradost.cloudstream3.mainPageOf  
-import com.lagradost.cloudstream3.newMovieSearchResponse  
-import com.lagradost.cloudstream3.newTvSeriesSearchResponse
-import com.lagradost.cloudstream3.newTvSeriesLoadResponse  
-import com.lagradost.cloudstream3.newMovieLoadResponse  
-import com.lagradost.cloudstream3.newEpisode  
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element
 import org.jsoup.Jsoup
 
 class OppadramaProvider : MainAPI() {
-    override var mainUrl = "http://45.11.57.192"
+    override var mainUrl = "http://45.11.57.192" // Pastikan IP/URL ini yang paling terkini
     override var name = "OppaDrama"
     override val hasMainPage = true
     override var lang = "id"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
     companion object {
-        var context: android.content.Context? = null
-        
         fun getStatus(t: String): ShowStatus {
             return when {
                 t.contains("Completed", ignoreCase = true) -> ShowStatus.Completed
@@ -58,15 +47,22 @@ class OppadramaProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val pageUrl = if (page <= 1) {
+        // Pembaikan Struktur Pagination untuk Tema Wp-Manga / Themesia
+        val pageUrl = if (page == 1) {
             "$mainUrl/${request.data}"
         } else {
-            val char = if (request.data.contains("?")) "&" else "?"
-            "$mainUrl/${request.data}${char}page=$page"
+            if (request.data.contains("?")) {
+                val parts = request.data.split("?", limit = 2)
+                "$mainUrl/${parts[0]}page/$page/?${parts.getOrNull(1) ?: ""}"
+            } else {
+                "$mainUrl/${request.data.removeSuffix("/")}/page/$page/"
+            }
         }
 
         val document = app.get(pageUrl).document
-        val items = document.select("div.listupd article.bs, div.listupd div.bs")
+        
+        // CSS Selector Diluaskan untuk menangkap pelbagai bentuk grid
+        val items = document.select("div.listupd article, div.listupd div.bs, div.post-item, div.item, article.item, div.box-item")
                             .mapNotNull { it.toSearchResult() }
 
         return newHomePageResponse(HomePageList(request.name, items), hasNext = items.isNotEmpty())
@@ -75,22 +71,26 @@ class OppadramaProvider : MainAPI() {
     private fun Element.toSearchResult(): SearchResponse? {
         val linkElement = this.selectFirst("a") ?: return null
         val href = fixUrl(linkElement.attr("href"))
-        val title = (linkElement.attr("title").ifBlank {
-            this.selectFirst("div.tt, div.title, h2")?.text()
-        })?.trim() ?: return null
+        
+        // Pembaikan tangkapan Tajuk (Title) - lebih fleksibel
+        var title = linkElement.attr("title")
+        if (title.isNullOrBlank()) {
+            title = this.selectFirst("div.tt, div.title, h2, h3, .ep_title")?.text() ?: ""
+        }
+        if (title.isBlank()) title = linkElement.text()
+        if (title.isBlank()) return null // Gugurkan jika masih tiada tajuk
 
         val poster = this.selectFirst("img")?.getImageAttr()?.let { fixUrlNull(it) }
         
-        // Pengecaman jenis tajuk (Movie vs Series)
-        val typeText = this.selectFirst("div.typez, span.type")?.text()?.lowercase() ?: ""
+        val typeText = this.selectFirst("div.typez, span.type, .status")?.text()?.lowercase() ?: ""
         val isMovie = typeText.contains("movie") || href.contains("/movie/", true)
 
         return if (isMovie) {
-            newMovieSearchResponse(title, href, TvType.Movie) {
+            newMovieSearchResponse(title.trim(), href, TvType.Movie) {
                 this.posterUrl = poster
             }
         } else {
-            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+            newTvSeriesSearchResponse(title.trim(), href, TvType.TvSeries) {
                 this.posterUrl = poster
             }
         }
@@ -98,18 +98,21 @@ class OppadramaProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val document = app.get("$mainUrl/?s=$query").document
-        return document.select("div.listupd article.bs, div.listupd div.bs")
+        return document.select("div.listupd article, div.listupd div.bs, div.post-item, div.item, article.item")
             .mapNotNull { it.toSearchResult() }
     }
 
     private fun Element.toRecommendResult(): SearchResponse? {
-        val title = this.selectFirst("div.tt, div.title")?.text()?.trim() 
-            ?: this.selectFirst("a")?.attr("title")?.trim() 
-            ?: return null
-        val href = fixUrl(this.selectFirst("a")?.attr("href") ?: return null)
+        val linkElement = this.selectFirst("a") ?: return null
+        val href = fixUrl(linkElement.attr("href"))
+        
+        var title = this.selectFirst("div.tt, div.title")?.text()
+        if (title.isNullOrBlank()) title = linkElement.attr("title")
+        if (title.isNullOrBlank()) return null
+
         val posterUrl = this.selectFirst("img")?.getImageAttr()?.let { fixUrlNull(it) }
         
-        return newMovieSearchResponse(title, href, TvType.Movie) {
+        return newMovieSearchResponse(title.trim(), href, TvType.Movie) {
             this.posterUrl = posterUrl
         }
     }
@@ -117,10 +120,10 @@ class OppadramaProvider : MainAPI() {
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url).document
 
-        val title = document.selectFirst("h1.entry-title, h1.tit")?.text()?.trim().orEmpty()
-        val poster = document.selectFirst("div.bigcontent img, div.thumb img")?.getImageAttr()?.let { fixUrlNull(it) }
+        val title = document.selectFirst("h1.entry-title, h1.tit, h1[itemprop=name]")?.text()?.trim().orEmpty()
+        val poster = document.selectFirst("div.bigcontent img, div.thumb img, div.poster img")?.getImageAttr()?.let { fixUrlNull(it) }
         
-        val description = document.select("div.entry-content p, div.desc p")
+        val description = document.select("div.entry-content p, div.desc p, div.mindes p")
             .joinToString("\n") { it.text() }
             .trim()
 
@@ -133,12 +136,12 @@ class OppadramaProvider : MainAPI() {
             if (h == 0 && m == 0) it.filter { c -> c.isDigit() }.toIntOrNull() else h * 60 + m
         }
 
-        val tags = document.select("div.genxed a, div.genre a").map { it.text() }
+        val tags = document.select("div.genxed a, div.genre a, .sgen a").map { it.text() }
 
-        val actors = document.select("span:has(b:matchesOwn((?i)Artis|Cast:)) a, div.cast a")
+        val actors = document.select("span:has(b:matchesOwn((?i)Artis|Cast:)) a, div.cast a, .actor a")
             .map { it.text().trim() }
 
-        val rating = document.selectFirst("div.rating strong, span[itemprop=ratingValue]")
+        val rating = document.selectFirst("div.rating strong, span[itemprop=ratingValue], .numrating")
             ?.text()
             ?.replace("Rating", "")
             ?.trim()
@@ -153,16 +156,16 @@ class OppadramaProvider : MainAPI() {
             ?: ""
         val status = getStatus(statusText)
 
-        val recommendations = document.select("div.listupd article.bs, div.listupd div.bs")
+        val recommendations = document.select("div.listupd article, div.listupd div.bs, div.post-item")
             .mapNotNull { it.toRecommendResult() }
 
-        val episodeElements = document.select("div.eplister ul li a")
+        val episodeElements = document.select("div.eplister ul li a, div.episodelist ul li a")
 
         val episodes = episodeElements
             .reversed()
             .mapIndexed { index, aTag ->
                 val href = fixUrl(aTag.attr("href"))
-                val epName = aTag.selectFirst("div.epl-num")?.text() ?: "Episode ${index + 1}"
+                val epName = aTag.selectFirst("div.epl-num, .epl-title")?.text() ?: "Episode ${index + 1}"
 
                 newEpisode(href) {
                     this.name = epName
@@ -206,15 +209,15 @@ class OppadramaProvider : MainAPI() {
     ): Boolean {
         val document = app.get(data).document
 
-        document.selectFirst("div.player-embed iframe, div.embed-container iframe")
+        document.selectFirst("div.player-embed iframe, div.embed-container iframe, div.megamenu iframe")
             ?.getIframeAttr()
             ?.let { iframe ->
                 loadExtractor(httpsify(iframe), data, subtitleCallback, callback)
             }
 
-        val mirrorOptions = document.select("select.mirror option[value]:not([disabled])")
+        val mirrorOptions = document.select("select.mirror option[value]:not([disabled]), ul.mirrors li a")
         for (opt in mirrorOptions) {
-            val base64 = opt.attr("value")
+            val base64 = opt.attr("value").ifBlank { opt.attr("data-url") }
             if (base64.isBlank()) continue
             try {
                 val cleaned = base64.replace("\\s".toRegex(), "")
@@ -223,13 +226,13 @@ class OppadramaProvider : MainAPI() {
                 val mirrorUrl = when {
                     iframeTag?.attr("src")?.isNotBlank() == true -> iframeTag.attr("src")
                     iframeTag?.attr("data-src")?.isNotBlank() == true -> iframeTag.attr("data-src")
-                    else -> null
+                    else -> decodedHtml // In case it's a direct link decoded
                 }
                 if (!mirrorUrl.isNullOrBlank()) {
                     loadExtractor(httpsify(mirrorUrl), data, subtitleCallback, callback)
                 }
             } catch (_: Exception) {
-                // Abaikan jika mirror rosak
+                // Abaikan jika tak berjaya decode
             }
         }
 
