@@ -116,7 +116,18 @@ class AnichinProvider : MainAPI() {
                 val decoded = base64Decode(base64)
                 val doc = Jsoup.parse(decoded)
                 val href = fixUrl(doc.select("iframe").attr("src"))
-                loadExtractor(href, subtitleCallback, callback)
+
+val response = app.get(
+    href,
+    referer = data
+)
+
+val streamDoc = response.document
+val realUrl = streamDoc.select("iframe").attr("src")
+
+if (realUrl.isNotBlank()) {
+    loadExtractor(realUrl, subtitleCallback, callback)
+}
             }
         }
         return true
