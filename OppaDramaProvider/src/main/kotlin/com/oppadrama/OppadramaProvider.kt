@@ -45,10 +45,10 @@ class OppadramaProvider : MainAPI() {
         return try {
             val document = app.get(pageUrl, headers = customHeaders).document
             
-            // Mengambil semua bekas kad item (sama ada di homepage slider, widget, atau listupd)
-            val items = document.select("div.listupd article.bs, div.listupd div.bs, div.bs, div.utao article, div.serieslist ul li")
+            // Mengambil terus tag <article class="bs"> dari HTML OppaDrama
+            val items = document.select("article.bs")
                 .mapNotNull { it.toSearchResult() }
-                .distinctBy { it.url } // Hilangkan rekod berganda
+                .distinctBy { it.url }
 
             newHomePageResponse(HomePageList(request.name, items), hasNext = items.isNotEmpty())
         } catch (e: Exception) {
@@ -60,20 +60,19 @@ class OppadramaProvider : MainAPI() {
         val aTag = this.selectFirst("a") ?: return null
         val href = fixUrl(aTag.attr("href"))
         
-        // Ambil tajuk dari pelbagai kemungkinan tag HTML
-        val title = (this.selectFirst(".tt, .title, h2, h3, .entry-title")?.text() 
+        // Mengambil tajuk dari h2 itemprop="headline", div.tt atau attribute title
+        val title = (this.selectFirst("h2[itemprop=headline]")?.text()
+            ?: this.selectFirst("div.tt")?.ownText()
             ?: aTag.attr("title")).trim()
 
         if (title.isBlank()) return null
 
-        // Pengecaman imej poster yang menyeluruh (Lazy Load & Data Sources)
+        // Mengambil gambar poster terus dari atribut src atau data-src
         val img = this.selectFirst("img")
-        val posterUrl = img?.attr("abs:data-src")?.ifBlank { null }
-            ?: img?.attr("abs:data-lazy-src")?.ifBlank { null }
-            ?: img?.attr("abs:srcset")?.split(" ")?.firstOrNull()
-            ?: img?.attr("abs:src")
+        val posterUrl = img?.attr("abs:src")?.ifBlank { null }
+            ?: img?.attr("abs:data-src")?.ifBlank { null }
 
-        val typeStr = this.selectFirst(".typez, .type, .type-label")?.text()?.lowercase() ?: ""
+        val typeStr = this.selectFirst("div.typez")?.text()?.lowercase() ?: ""
         val isMovie = typeStr.contains("movie") || href.contains("/movie/", true)
 
         return if (isMovie) {
@@ -90,7 +89,7 @@ class OppadramaProvider : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url, headers = customHeaders).document
-        return document.select("div.listupd article.bs, div.listupd div.bs, div.bs, div.utao article")
+        return document.select("article.bs")
             .mapNotNull { it.toSearchResult() }
             .distinctBy { it.url }
     }
@@ -98,9 +97,9 @@ class OppadramaProvider : MainAPI() {
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url, headers = customHeaders).document
 
-        val title = document.selectFirst("h1.entry-title, h1.tit")?.text()?.trim().orEmpty()
+        val title = document.selectFirst("h1.entry-title, h1[itemprop=headline]")?.text()?.trim().orEmpty()
         val poster = document.selectFirst("div.bigcontent img, div.thumb img")?.let { img ->
-            img.attr("abs:data-src").ifBlank { null } ?: img.attr("abs:src")
+            img.attr("abs:src").ifBlank { null } ?: img.attr("abs:data-src")
         }
         val plot = document.select("div.entry-content p, div.desc p").joinToString("\n") { it.text() }.trim()
 
@@ -113,7 +112,7 @@ class OppadramaProvider : MainAPI() {
         val episodeElements = document.select("div.eplister ul li a")
         val episodes = episodeElements.reversed().mapIndexed { index, aTag ->
             val epHref = fixUrl(aTag.attr("href"))
-            val epName = aTag.selectFirst(".epl-num")?.text() ?: "Episode ${index + 1}"
+            val epName = aTag.selectFirst("div.epl-num")?.text() ?: "Episode ${index + 1}"
             newEpisode(epHref) {
                 this.name = epName
                 this.episode = index + 1
