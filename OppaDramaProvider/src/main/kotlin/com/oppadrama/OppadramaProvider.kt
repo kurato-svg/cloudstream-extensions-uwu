@@ -60,7 +60,7 @@ class OppadramaProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-    val url = "$mainUrl/${request.data}".replace(" ", "").plus("&page=$page")
+    val url = "$mainUrl/${request.data.trim().replace("\\s+".toRegex(), "")}&page=$page"
     val document = app.get(url).document
 
     println("OPPADRAMA URL = $url")
