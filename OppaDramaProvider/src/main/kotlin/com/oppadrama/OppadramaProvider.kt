@@ -9,14 +9,13 @@ class OppadramaProvider : MainAPI() {
 
     override var mainUrl = "http://45.11.57.192"
     override var name = "OppaDrama"
+    override var lang = "id"
 
     override val hasMainPage = true
-    override var lang = "id"
 
     override val supportedTypes = setOf(
         TvType.Movie,
-        TvType.TvSeries,
-        TvType.Anime
+        TvType.TvSeries
     )
 
     override val mainPage = mainPageOf(
@@ -40,34 +39,20 @@ class OppadramaProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(
-    page: Int,
-    request: MainPageRequest
-): HomePageResponse {
+        page: Int,
+        request: MainPageRequest
+    ): HomePageResponse {
 
-    val url = "http://45.11.57.192/series/?status=&type=&order=update&page=$page"
+        val url = "$mainUrl/${request.data}&page=$page"
 
-    println("OPPADRAMA TEST URL = [$url]")
+        val document = app.get(url).document
 
-    val document = app.get(url).document
-
-println("OPPADRAMA V2 TITLE = [${document.title()}]")
-println("OPPADRAMA V2 HTML LENGTH = ${document.html().length}")
-println("OPPADRAMA V2 ARTICLES = ${document.select("article").size}")
-println("OPPADRAMA V2 DIVS = ${document.select("div").size}")
-
-    // baki code...
         val items = document
-            .select("article, .item, .bs, .listupd > div")
+            .select(".listupd .bs")
             .mapNotNull { it.toSearchResult() }
 
-        println("OPPADRAMA V2 ITEMS = ${items.size}")
-
         return newHomePageResponse(
-            HomePageList(
-                request.name,
-                items,
-                isHorizontalImages = false
-            ),
+            HomePageList(request.name, items),
             hasNext = items.isNotEmpty()
         )
     }
@@ -76,7 +61,7 @@ println("OPPADRAMA V2 DIVS = ${document.select("div").size}")
 
         val link = selectFirst("a[href]") ?: return null
 
-        val href = link.attr("href").trim()
+        val href = fixUrl(link.attr("href"))
 
         if (href.isBlank()) return null
 
@@ -84,8 +69,8 @@ println("OPPADRAMA V2 DIVS = ${document.select("div").size}")
             link.attr("title").isNotBlank() ->
                 link.attr("title").trim()
 
-            selectFirst(".title, .tt, .name") != null ->
-                selectFirst(".title, .tt, .name")!!.text().trim()
+            selectFirst(".tt") != null ->
+                selectFirst(".tt")!!.text().trim()
 
             else ->
                 link.text().trim()
@@ -93,81 +78,77 @@ println("OPPADRAMA V2 DIVS = ${document.select("div").size}")
 
         if (title.isBlank()) return null
 
-        val poster = selectFirst("img")?.let { img ->
+        val image = selectFirst("img")
 
-            when {
-                img.attr("data-src").isNotBlank() ->
-                    fixUrlNull(img.attr("data-src"))
+        val poster = when {
+            image?.attr("data-src")?.isNotBlank() == true ->
+                fixUrlNull(image.attr("data-src"))
 
-                img.attr("data-lazy-src").isNotBlank() ->
-                    fixUrlNull(img.attr("data-lazy-src"))
+            image?.attr("data-lazy-src")?.isNotBlank() == true ->
+                fixUrlNull(image.attr("data-lazy-src"))
 
-                img.attr("src").isNotBlank() ->
-                    fixUrlNull(img.attr("src"))
+            image?.attr("src")?.isNotBlank() == true ->
+                fixUrlNull(image.attr("src"))
 
-                else -> null
-            }
+            else -> null
         }
-
-        val fixedUrl = fixUrl(href)
 
         return newTvSeriesSearchResponse(
             title,
-            fixedUrl,
+            href,
             TvType.TvSeries
         ) {
-            this.posterUrl = poster
+            posterUrl = poster
         }
     }
 
-    override suspend fun search(
-        query: String
-    ): List<SearchResponse> {
+    override suspend fun search(query: String): List<SearchResponse> {
 
         val url = "$mainUrl/?s=${query.replace(" ", "+")}"
-
-        println("OPPADRAMA V2 SEARCH = $url")
 
         val document = app.get(url).document
 
         return document
-            .select("article, .item, .bs, .listupd > div")
+            .select(".listupd .bs")
             .mapNotNull { it.toSearchResult() }
-            .distinctBy { it.url }
     }
 
     override suspend fun load(url: String): LoadResponse {
 
-        val document = app.get(fixUrl(url)).document
+        val document = app.get(url).document
 
         val title = document
-            .selectFirst("h1.entry-title, h1")
+            .selectFirst("h1.entry-title")
             ?.text()
             ?.trim()
-            ?: "Unknown"
+            ?: return newMovieLoadResponse(
+                "Unknown",
+                url,
+                TvType.Movie,
+                url
+            )
 
         val poster = document
-            .selectFirst(
-                "meta[property=og:image]"
-            )
-            ?.attr("content")
-            ?.let { fixUrlNull(it) }
+            .selectFirst(".thumb img, .poster img")
+            ?.let {
+                when {
+                    it.attr("data-src").isNotBlank() ->
+                        fixUrlNull(it.attr("data-src"))
 
-        val description = document
-            .selectFirst(
-                ".entry-content, .desc, .description"
-            )
-            ?.text()
-            ?.trim()
+                    it.attr("src").isNotBlank() ->
+                        fixUrlNull(it.attr("src"))
 
-        return newTvSeriesLoadResponse(
+                    else -> null
+                }
+            }
+
+        return newMovieLoadResponse(
             title,
             url,
-            TvType.TvSeries,
-            emptyList()
+            TvType.Movie,
+            url
         ) {
-            this.posterUrl = poster
-            this.plot = description
+            posterUrl = poster
         }
     }
 
