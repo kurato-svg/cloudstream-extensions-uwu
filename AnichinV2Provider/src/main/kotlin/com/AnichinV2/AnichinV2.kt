@@ -250,38 +250,29 @@ class AnichinV2 : MainAPI() {
 
     document.select(".mobius option").forEach { server ->
 
-    val serverName = server.text().trim()
-    val base64 = server.attr("value")
+        val serverName = server.text().trim()
+        val base64 = server.attr("value")
 
-    println("ANICHIN V2 SERVER NAME:")
-    println(serverName)
-
-    println("ANICHIN V2 BASE64:")
-    println(base64)
-
-    if (base64.isBlank()) return@forEach
-
-    val decoded = base64Decode(base64)
-    val doc = Jsoup.parse(decoded)
-
-    val iframe = doc
-        .selectFirst("iframe")
-        ?.attr("src")
-        ?.trim()
-        .orEmpty()
-
-    println("ANICHIN V2 IFRAME:")
-    println(iframe)
-
-    if (iframe.isBlank()) return@forEach
-
-    val streamUrl = fixUrl(iframe)
-
-    println("ANICHIN V2 STREAM URL:")
-    println(streamUrl)
+        if (base64.isBlank()) return@forEach
 
         try {
 
+            // Decode server value
+            val decoded = base64Decode(base64)
+            val decodedDoc = Jsoup.parse(decoded)
+
+            // Get Anichin stream URL
+            val iframe = decodedDoc
+                .selectFirst("iframe")
+                ?.attr("src")
+                ?.trim()
+                .orEmpty()
+
+            if (iframe.isBlank()) return@forEach
+
+            val streamUrl = fixUrl(iframe)
+
+            // Open Anichin stream wrapper
             val streamResponse = app.get(
                 streamUrl,
                 headers = mapOf(
@@ -291,67 +282,49 @@ class AnichinV2 : MainAPI() {
                 )
             )
 
+            // Get player wrapper URL
             val playerUrl = streamResponse.document
-    .selectFirst("iframe")
-    ?.attr("src")
-    ?.trim()
-    .orEmpty()
+                .selectFirst("iframe[src]")
+                ?.attr("src")
+                ?.trim()
+                .orEmpty()
 
-println("ANICHIN V2 PLAYER URL:")
-println(playerUrl)
+            if (playerUrl.isBlank()) return@forEach
 
-if (playerUrl.isBlank()) {
-    println("ANICHIN V2: NO PLAYER URL")
-    return@forEach
-}
+            val fixedPlayerUrl = fixUrl(playerUrl)
 
-val fixedPlayerUrl = fixUrl(playerUrl)
+            // Open player wrapper
+            val playerResponse = app.get(
+                fixedPlayerUrl,
+                headers = mapOf(
+                    "Referer" to streamUrl,
+                    "User-Agent" to USER_AGENT
+                )
+            )
 
-val playerResponse = app.get(
-    fixedPlayerUrl,
-    headers = mapOf(
-        "Referer" to streamUrl,
-        "User-Agent" to USER_AGENT
-    )
-)
+            // Get the actual embed URL
+            val realEmbedUrl = playerResponse.document
+                .selectFirst("iframe[src]")
+                ?.attr("src")
+                ?.trim()
+                .orEmpty()
 
-println("ANICHIN V2 PLAYER HTML:")
-println(playerResponse.text.take(5000))
+            if (realEmbedUrl.isBlank()) return@forEach
 
-// Cari iframe sebenar dalam wrapper
-val realEmbedUrl = playerResponse.document
-    .selectFirst("iframe[src]")
-    ?.attr("src")
-    ?.trim()
-    .orEmpty()
+            val fixedEmbedUrl = fixUrl(realEmbedUrl)
 
-println("ANICHIN V2 REAL EMBED:")
-println(realEmbedUrl)
-
-if (realEmbedUrl.isBlank()) {
-    println("ANICHIN V2: NO REAL EMBED URL")
-    return@forEach
-}
-
-val fixedEmbedUrl = fixUrl(realEmbedUrl)
-
-println("ANICHIN V2 CALLING EXTRACTOR:")
-println(fixedEmbedUrl)
-
-loadExtractor(
-    fixedEmbedUrl,
-    fixedPlayerUrl,
-    subtitleCallback,
-    callback
-)
-
-println("ANICHIN V2 EXTRACTOR FINISHED:")
-println(fixedEmbedUrl)
+            // Send actual embed to CloudStream extractor
+            loadExtractor(
+                fixedEmbedUrl,
+                fixedPlayerUrl,
+                subtitleCallback,
+                callback
+            )
 
         } catch (e: Exception) {
 
             println(
-                "ANICHIN V2 SERVER ERROR: ${e.message}"
+                "ANICHIN V2 SERVER ERROR [$serverName]: ${e.message}"
             )
         }
     }
