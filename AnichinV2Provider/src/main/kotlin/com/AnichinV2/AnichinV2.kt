@@ -250,25 +250,35 @@ class AnichinV2 : MainAPI() {
 
     document.select(".mobius option").forEach { server ->
 
-        val base64 = server.attr("value")
+    val serverName = server.text().trim()
+    val base64 = server.attr("value")
 
-        if (base64.isBlank()) return@forEach
+    println("ANICHIN V2 SERVER NAME:")
+    println(serverName)
 
-        val decoded = base64Decode(base64)
-        val doc = Jsoup.parse(decoded)
+    println("ANICHIN V2 BASE64:")
+    println(base64)
 
-        val iframe = doc
-            .selectFirst("iframe")
-            ?.attr("src")
-            ?.trim()
-            .orEmpty()
+    if (base64.isBlank()) return@forEach
 
-        if (iframe.isBlank()) return@forEach
+    val decoded = base64Decode(base64)
+    val doc = Jsoup.parse(decoded)
 
-        val streamUrl = fixUrl(iframe)
+    val iframe = doc
+        .selectFirst("iframe")
+        ?.attr("src")
+        ?.trim()
+        .orEmpty()
 
-        println("ANICHIN V2 STREAM URL:")
-        println(streamUrl)
+    println("ANICHIN V2 IFRAME:")
+    println(iframe)
+
+    if (iframe.isBlank()) return@forEach
+
+    val streamUrl = fixUrl(iframe)
+
+    println("ANICHIN V2 STREAM URL:")
+    println(streamUrl)
 
         try {
 
