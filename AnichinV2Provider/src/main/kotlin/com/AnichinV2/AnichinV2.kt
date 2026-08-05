@@ -238,57 +238,44 @@ class AnichinV2 : MainAPI() {
     }
 
     override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
+    data: String,
+    isCasting: Boolean,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit
+): Boolean {
 
-        val document = app.get(
-            fixUrl(data)
-        ).document
+    val document = app.get(
+        fixUrl(data)
+    ).document
 
-        document
-            .select(".mobius option")
-            .forEach { server ->
+    document.select(".mobius option").forEach { server ->
 
-                val base64 = server.attr("value")
+        val base64 = server.attr("value")
 
-                if (base64.isNotBlank()) {
+        if (base64.isNotBlank()) {
 
-                    val decoded = base64Decode(base64)
+            val decoded = base64Decode(base64)
+            val doc = Jsoup.parse(decoded)
 
-                    println("ANICHIN V2 SERVER VALUE:")
-                    println(base64)
+            val iframe = doc
+                .select("iframe")
+                .attr("src")
+                .trim()
 
-                    println("ANICHIN V2 DECODED:")
-                    println(decoded)
+            if (iframe.isNotBlank()) {
 
-                    val doc = Jsoup.parse(decoded)
+                val streamUrl = fixUrl(iframe)
 
-                    val iframe = doc
-                        .select("iframe")
-                        .attr("src")
+                println("ANICHIN V2 STREAM URL:")
+                println(streamUrl)
 
-                    println("ANICHIN V2 IFRAME:")
-                    println(iframe)
+                val streamResponse = app.get(streamUrl)
 
-                    if (iframe.isNotBlank()) {
-
-                        val href = fixUrl(iframe)
-
-                        println("ANICHIN V2 EXTRACTOR URL:")
-                        println(href)
-
-                        loadExtractor(
-                            href,
-                            subtitleCallback,
-                            callback
-                        )
-                    }
-                }
+                println("ANICHIN V2 STREAM RESPONSE:")
+                println(streamResponse.text.take(5000))
             }
-
-        return true
+        }
     }
+
+    return true
 }
