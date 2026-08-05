@@ -6,8 +6,7 @@ import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element
 
 class OppadramaProvider : MainAPI() {
-
-    override var mainUrl = "http://45.11.57.192"
+override var mainUrl = "https://oppa.biz"
     override var name = "OppaDrama"
     override var lang = "id"
 
