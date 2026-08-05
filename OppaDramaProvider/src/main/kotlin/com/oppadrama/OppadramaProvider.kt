@@ -60,11 +60,24 @@ class OppadramaProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = "$mainUrl/${request.data}".plus("&page=$page")
-        val document = app.get(url).document
-        val items = document.select("div.listupd article.bs")
-                            .mapNotNull { it.toSearchResult() }
-        return newHomePageResponse(HomePageList(request.name, items), hasNext = items.isNotEmpty())
+    val url = "$mainUrl/${request.data}".plus("&page=$page")
+    val document = app.get(url).document
+
+    println("OPPADRAMA URL = $url")
+    println("OPPADRAMA TITLE = ${document.title()}")
+    println("OPPADRAMA ARTICLES = ${document.select("article").size}")
+    println("OPPADRAMA BS = ${document.select("article.bs").size}")
+    println("OPPADRAMA LISTUPD = ${document.select("div.listupd").size}")
+
+    val items = document.select("article")
+        .mapNotNull { it.toSearchResult() }
+
+    println("OPPADRAMA ITEMS = ${items.size}")
+
+    return newHomePageResponse(
+        HomePageList(request.name, items),
+        hasNext = items.isNotEmpty()
+    )
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
