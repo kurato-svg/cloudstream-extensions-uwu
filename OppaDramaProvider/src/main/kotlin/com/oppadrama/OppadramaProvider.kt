@@ -50,10 +50,7 @@ class OppadramaProvider : MainAPI() {
 println("OPPADRAMA DEBUG URL = [$url]")
 println("OPPADRAMA DEBUG TITLE = [${document.title()}]")
 println("OPPADRAMA DEBUG HTML = ${document.html().length}")
-println("OPPADRAMA DEBUG ARTICLE = ${document.select("article").size}")
-println("OPPADRAMA DEBUG DIV = ${document.select("div").size}")
-println("OPPADRAMA DEBUG A = ${document.select("a").size}")
-println("OPPADRAMA DEBUG IMG = ${document.select("img").size}")
+println("OPPADRAMA DEBUG RAW = [${document.html()}]")
 
 val items = emptyList<SearchResponse>()
 
