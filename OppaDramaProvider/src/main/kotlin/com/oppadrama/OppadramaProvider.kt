@@ -20,7 +20,7 @@ import org.jsoup.Jsoup
 
 
 class OppadramaProvider : MainAPI() {
-    override var mainUrl = "http://45.11.57.125"
+    override var mainUrl = "http://45.11.57.192/"
     override var name = "OppaDrama"
     override val hasMainPage = true
     override var lang = "id"
