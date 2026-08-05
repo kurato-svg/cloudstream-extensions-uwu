@@ -303,6 +303,16 @@ class AnichinV2 : MainAPI() {
             }
 
             val fixedPlayerUrl = fixUrl(playerUrl)
+            val playerResponse = app.get(
+    fixedPlayerUrl,
+    headers = mapOf(
+        "Referer" to streamUrl,
+        "User-Agent" to USER_AGENT
+    )
+)
+
+println("ANICHIN V2 PLAYER HTML:")
+println(playerResponse.text.take(5000))
 
 println("ANICHIN V2 PLAYER URL:")
 println(fixedPlayerUrl)
