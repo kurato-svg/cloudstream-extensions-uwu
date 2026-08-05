@@ -6,7 +6,7 @@ import com.lagradost.cloudstream3.utils.*
 import org.jsoup.Jsoup
 
 class Animexin : MainAPI() {
-    override var mainUrl              = "https://anichin.cafe"
+    override var mainUrl              = "https://animexin.dev"
     override var name                 = "Animexin"
     override val hasMainPage          = true
     override var lang                 = "id"
