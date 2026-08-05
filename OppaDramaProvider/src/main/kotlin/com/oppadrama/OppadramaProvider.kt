@@ -47,13 +47,19 @@ class OppadramaProvider : MainAPI() {
 
         val document = app.get(url).document
 
-val items = document
-    .select("article")
-    .mapNotNull { it.toSearchResult() }
+println("OPPADRAMA DEBUG URL = [$url]")
+println("OPPADRAMA DEBUG TITLE = [${document.title()}]")
+println("OPPADRAMA DEBUG HTML = ${document.html().length}")
+println("OPPADRAMA DEBUG ARTICLE = ${document.select("article").size}")
+println("OPPADRAMA DEBUG DIV = ${document.select("div").size}")
+println("OPPADRAMA DEBUG A = ${document.select("a").size}")
+println("OPPADRAMA DEBUG IMG = ${document.select("img").size}")
+
+val items = emptyList<SearchResponse>()
 
 return newHomePageResponse(
     HomePageList(request.name, items),
-    hasNext = items.isNotEmpty()
+    hasNext = false
 )
     }
 
