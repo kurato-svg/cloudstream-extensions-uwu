@@ -40,25 +40,20 @@ class OppadramaProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(
-        page: Int,
-        request: MainPageRequest
-    ): HomePageResponse {
+    page: Int,
+    request: MainPageRequest
+): HomePageResponse {
 
-        val url = "$mainUrl/${request.data}"
-    .replace(" ", "")
-    .replace("\n", "")
-    .replace("\t", "")
-    .trim()
-    .let {
-        if (it.contains("?")) "$it&page=$page"
-        else "$it?page=$page"
-    }
+    val url = "http://45.11.57.192/series/?status=&type=&order=update&page=$page"
 
-        println("OPPADRAMA V2 URL = $url")
+    println("OPPADRAMA TEST URL = [$url]")
 
-        val document = app.get(url).document
+    val document = app.get(url).document
 
-        println("OPPADRAMA V2 TITLE = ${document.title()}")
+    println("OPPADRAMA V2 TITLE = ${document.title()}")
+
+    // baki code...
+}
 
         val items = document
             .select("article, .item, .bs, .listupd > div")
