@@ -252,50 +252,63 @@ class AnichinV2 : MainAPI() {
 
         val base64 = server.attr("value")
 
-        if (base64.isNotBlank()) {
+        if (base64.isBlank()) return@forEach
 
-            val decoded = base64Decode(base64)
-            val doc = Jsoup.parse(decoded)
+        val decoded = base64Decode(base64)
+        val doc = Jsoup.parse(decoded)
 
-            val iframe = doc
-                .select("iframe")
-                .attr("src")
-                .trim()
+        val iframe = doc
+            .selectFirst("iframe")
+            ?.attr("src")
+            ?.trim()
+            .orEmpty()
 
-            if (iframe.isNotBlank()) {
+        if (iframe.isBlank()) return@forEach
 
-                val streamUrl = fixUrl(iframe)
+        val streamUrl = fixUrl(iframe)
 
-                println("ANICHIN V2 STREAM URL:")
-                println(streamUrl)
+        println("ANICHIN V2 STREAM URL:")
+        println(streamUrl)
 
-                val streamResponse = app.get(
-    streamUrl,
-    headers = mapOf(
-        "Referer" to fixUrl(data),
-        "Origin" to mainUrl,
-        "User-Agent" to USER_AGENT
-    )
-)
+        try {
 
-val playerUrl = streamResponse.document
-    .selectFirst("iframe")
-    ?.attr("src")
-    ?.trim()
+            val streamResponse = app.get(
+                streamUrl,
+                headers = mapOf(
+                    "Referer" to fixUrl(data),
+                    "Origin" to mainUrl,
+                    "User-Agent" to USER_AGENT
+                )
+            )
 
-if (!playerUrl.isNullOrBlank()) {
+            val playerUrl = streamResponse.document
+                .selectFirst("iframe")
+                ?.attr("src")
+                ?.trim()
+                .orEmpty()
 
-    println("ANICHIN V2 PLAYER URL:")
-    println(playerUrl)
-
-    loadExtractor(
-        playerUrl,
-        streamUrl,
-        subtitleCallback,
-        callback
-    )
-}
+            if (playerUrl.isBlank()) {
+                println("ANICHIN V2: NO PLAYER URL")
+                return@forEach
             }
+
+            val fixedPlayerUrl = fixUrl(playerUrl)
+
+            println("ANICHIN V2 PLAYER URL:")
+            println(fixedPlayerUrl)
+
+            loadExtractor(
+                fixedPlayerUrl,
+                streamUrl,
+                subtitleCallback,
+                callback
+            )
+
+        } catch (e: Exception) {
+
+            println(
+                "ANICHIN V2 SERVER ERROR: ${e.message}"
+            )
         }
     }
 
