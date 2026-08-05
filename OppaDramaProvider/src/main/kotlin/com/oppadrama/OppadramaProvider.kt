@@ -60,7 +60,7 @@ class OppadramaProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-    val url = "$mainUrl/${request.data}".plus("&page=$page")
+    val url = "$mainUrl/${request.data}".replace(" ", "").plus("&page=$page")
     val document = app.get(url).document
 
     println("OPPADRAMA URL = $url")
@@ -78,7 +78,7 @@ class OppadramaProvider : MainAPI() {
         HomePageList(request.name, items),
         hasNext = items.isNotEmpty()
     )
-    }
+}
 
     private fun Element.toSearchResult(): SearchResponse? {
     val linkElement = this.selectFirst("a") ?: return null
