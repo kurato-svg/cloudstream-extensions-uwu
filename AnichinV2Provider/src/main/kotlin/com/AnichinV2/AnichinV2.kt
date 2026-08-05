@@ -269,10 +269,17 @@ class AnichinV2 : MainAPI() {
                 println("ANICHIN V2 STREAM URL:")
                 println(streamUrl)
 
-                val streamResponse = app.get(streamUrl)
+                val streamResponse = app.get(
+    streamUrl,
+    headers = mapOf(
+        "Referer" to fixUrl(data),
+        "Origin" to mainUrl,
+        "User-Agent" to USER_AGENT
+    )
+)
 
-                println("ANICHIN V2 STREAM RESPONSE:")
-                println(streamResponse.text.take(5000))
+println("ANICHIN V2 STREAM RESPONSE:")
+println(streamResponse.text.take(5000))
             }
         }
     }
