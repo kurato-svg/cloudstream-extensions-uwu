@@ -304,15 +304,21 @@ class AnichinV2 : MainAPI() {
 
             val fixedPlayerUrl = fixUrl(playerUrl)
 
-            println("ANICHIN V2 PLAYER URL:")
-            println(fixedPlayerUrl)
+println("ANICHIN V2 PLAYER URL:")
+println(fixedPlayerUrl)
 
-            loadExtractor(
-                fixedPlayerUrl,
-                streamUrl,
-                subtitleCallback,
-                callback
-            )
+println("ANICHIN V2 CALLING EXTRACTOR:")
+println(fixedPlayerUrl)
+
+loadExtractor(
+    fixedPlayerUrl,
+    streamUrl,
+    subtitleCallback,
+    callback
+)
+
+println("ANICHIN V2 EXTRACTOR FINISHED:")
+println(fixedPlayerUrl)
 
         } catch (e: Exception) {
 
