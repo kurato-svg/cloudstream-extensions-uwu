@@ -44,7 +44,15 @@ class OppadramaProvider : MainAPI() {
         request: MainPageRequest
     ): HomePageResponse {
 
-        val url = "$mainUrl/${request.data}&page=$page"
+        val url = "$mainUrl/${request.data}"
+    .replace(" ", "")
+    .replace("\n", "")
+    .replace("\t", "")
+    .trim()
+    .let {
+        if (it.contains("?")) "$it&page=$page"
+        else "$it?page=$page"
+    }
 
         println("OPPADRAMA V2 URL = $url")
 
