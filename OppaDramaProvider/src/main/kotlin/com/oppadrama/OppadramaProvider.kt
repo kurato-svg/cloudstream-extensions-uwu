@@ -50,7 +50,10 @@ class OppadramaProvider : MainAPI() {
 
     val document = app.get(url).document
 
-    println("OPPADRAMA V2 TITLE = ${document.title()}")
+println("OPPADRAMA V2 TITLE = [${document.title()}]")
+println("OPPADRAMA V2 HTML LENGTH = ${document.html().length}")
+println("OPPADRAMA V2 ARTICLES = ${document.select("article").size}")
+println("OPPADRAMA V2 DIVS = ${document.select("div").size}")
 
     // baki code...
         val items = document
