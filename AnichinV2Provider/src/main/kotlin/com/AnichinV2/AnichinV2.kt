@@ -278,8 +278,23 @@ class AnichinV2 : MainAPI() {
     )
 )
 
-println("ANICHIN V2 STREAM RESPONSE:")
-println(streamResponse.text.take(5000))
+val playerUrl = streamResponse.document
+    .selectFirst("iframe")
+    ?.attr("src")
+    ?.trim()
+
+if (!playerUrl.isNullOrBlank()) {
+
+    println("ANICHIN V2 PLAYER URL:")
+    println(playerUrl)
+
+    loadExtractor(
+        playerUrl,
+        streamUrl,
+        subtitleCallback,
+        callback
+    )
+}
             }
         }
     }
