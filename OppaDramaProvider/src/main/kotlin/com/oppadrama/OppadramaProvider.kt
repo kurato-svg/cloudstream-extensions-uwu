@@ -45,7 +45,14 @@ class OppadramaProvider : MainAPI() {
 
         val url = "$mainUrl/${request.data}&page=$page"
 
-        val document = app.get(url).document
+        val document = app.get(
+    url,
+    headers = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36",
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language" to "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7"
+    )
+).document
 
 println("OPPADRAMA DEBUG URL = [$url]")
 println("OPPADRAMA DEBUG TITLE = [${document.title()}]")
