@@ -292,18 +292,22 @@ class AnichinV2 : MainAPI() {
             )
 
             val playerUrl = streamResponse.document
-                .selectFirst("iframe")
-                ?.attr("src")
-                ?.trim()
-                .orEmpty()
+    .selectFirst("iframe")
+    ?.attr("src")
+    ?.trim()
+    .orEmpty()
 
-            if (playerUrl.isBlank()) {
-                println("ANICHIN V2: NO PLAYER URL")
-                return@forEach
-            }
+println("ANICHIN V2 PLAYER URL:")
+println(playerUrl)
 
-            val fixedPlayerUrl = fixUrl(playerUrl)
-            val playerResponse = app.get(
+if (playerUrl.isBlank()) {
+    println("ANICHIN V2: NO PLAYER URL")
+    return@forEach
+}
+
+val fixedPlayerUrl = fixUrl(playerUrl)
+
+val playerResponse = app.get(
     fixedPlayerUrl,
     headers = mapOf(
         "Referer" to streamUrl,
@@ -314,21 +318,35 @@ class AnichinV2 : MainAPI() {
 println("ANICHIN V2 PLAYER HTML:")
 println(playerResponse.text.take(5000))
 
-println("ANICHIN V2 PLAYER URL:")
-println(fixedPlayerUrl)
+// Cari iframe sebenar dalam wrapper
+val realEmbedUrl = playerResponse.document
+    .selectFirst("iframe[src]")
+    ?.attr("src")
+    ?.trim()
+    .orEmpty()
+
+println("ANICHIN V2 REAL EMBED:")
+println(realEmbedUrl)
+
+if (realEmbedUrl.isBlank()) {
+    println("ANICHIN V2: NO REAL EMBED URL")
+    return@forEach
+}
+
+val fixedEmbedUrl = fixUrl(realEmbedUrl)
 
 println("ANICHIN V2 CALLING EXTRACTOR:")
-println(fixedPlayerUrl)
+println(fixedEmbedUrl)
 
 loadExtractor(
+    fixedEmbedUrl,
     fixedPlayerUrl,
-    streamUrl,
     subtitleCallback,
     callback
 )
 
 println("ANICHIN V2 EXTRACTOR FINISHED:")
-println(fixedPlayerUrl)
+println(fixedEmbedUrl)
 
         } catch (e: Exception) {
 
