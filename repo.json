@@ -1,0 +1,9 @@
+{
+    "name": "Kurato Repo",
+    "iconUrl": "https://raw.githubusercontent.com/kurato-svg/cloudstream-extensions-uwu/refs/heads/builds/icon.png",
+    "description": "A curated collection of CloudStream extensions for anime, donghua, movies, and TV series with Indonesian subtitles",
+    "manifestVersion": 1,
+    "pluginLists": [
+      "https://raw.githubusercontent.com/kurato-svg/cloudstream-extensions-uwu/refs/heads/builds/plugins.json"
+    ]
+}

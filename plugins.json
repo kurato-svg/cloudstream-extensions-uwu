@@ -1,0 +1,46 @@
+[
+    {
+        "url": "https://raw.githubusercontent.com/kurato-svg/cloudstream-extensions-uwu/builds/AnichinV2Provider.cs3",
+        "status": 1,
+        "version": 2,
+        "name": "AnichinV2Provider",
+        "internalName": "AnichinV2Provider",
+        "authors": [
+            "Kurato"
+        ],
+        "description": "Anichin \u2014 Streaming Donghua Subtitle Indonesia",
+        "fileSize": 44528,
+        "repositoryUrl": "https://github.com/kurato-svg/cloudstream-extensions-uwu",
+        "language": "id",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "Cartoon"
+        ],
+        "iconUrl": "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://anichin.club&size=%size%",
+        "apiVersion": 1,
+        "fileHash": "sha256-38985ae1c1c8c01f98bad01231b08ebf3904f9393174a301643a3f14d329a012"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/kurato-svg/cloudstream-extensions-uwu/builds/OppaDramaProvider.cs3",
+        "status": 1,
+        "version": 3,
+        "name": "OppaDramaProvider",
+        "internalName": "OppaDramaProvider",
+        "authors": [
+            "Miku"
+        ],
+        "description": "OppaDrama \u2014 Streaming Drama Korean, Movie and TV Series",
+        "fileSize": 42547,
+        "repositoryUrl": "https://github.com/kurato-svg/cloudstream-extensions-uwu",
+        "language": "id",
+        "tvTypes": [
+            "AsianDrama",
+            "TvSeries",
+            "Movie"
+        ],
+        "iconUrl": "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://45.11.57.243&size=%size%",
+        "apiVersion": 1,
+        "fileHash": "sha256-48d9605fe7a743431aed492e5008ffe2b0ec54bc75d1fb058ff6fd78a51d2d88"
+    }
+]
