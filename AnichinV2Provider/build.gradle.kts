@@ -5,5 +5,9 @@ cloudstream {
     language = "id"
     authors = listOf("Kurato")
     status = 3
-    tvTypes = listOf("AnimeMovie", "Anime", "Cartoon")
+    tvTypes = listOf(
+        "AnimeMovie",
+        "Anime",
+        "Cartoon"
+    )
 }
