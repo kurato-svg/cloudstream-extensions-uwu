@@ -279,3 +279,4 @@ class AnichinV2 : MainAPI() {
 
     return true
 }
+}
