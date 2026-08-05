@@ -53,8 +53,6 @@ class OppadramaProvider : MainAPI() {
     println("OPPADRAMA V2 TITLE = ${document.title()}")
 
     // baki code...
-}
-}
         val items = document
             .select("article, .item, .bs, .listupd > div")
             .mapNotNull { it.toSearchResult() }
