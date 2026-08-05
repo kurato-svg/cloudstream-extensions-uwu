@@ -249,6 +249,11 @@ class AnichinV2 : MainAPI() {
         ).document
 
         document.select(".mobius option").forEach { server ->
+           
+            println("========== ANICHIN SERVER ==========")
+println("SERVER: ${server.text().trim()}")
+println("VALUE: ${server.attr("value")}")
+println("====================================")
 
             val serverName = server.text().trim()
             val base64 = server.attr("value")
