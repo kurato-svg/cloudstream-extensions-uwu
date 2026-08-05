@@ -22,21 +22,33 @@ class AnichinV2 : MainAPI() {
     page: Int,
     request: MainPageRequest
 ): HomePageResponse {
-    val document = app.get(
-        if (request.data == "$mainUrl/") {
-            request.data
+    val document = app.get(request.data).document
+
+    val items = document.select("a").mapNotNull { element ->
+        val href = element.attr("href")
+        val title = element.text().trim()
+        val poster = element.selectFirst("img")?.attr("src")
+
+        if (
+            href.startsWith(mainUrl) &&
+            title.isNotBlank()
+        ) {
+            newAnimeSearchResponse(
+                title,
+                href,
+                TvType.Anime
+            ) {
+                this.posterUrl = poster
+            }
         } else {
-            "${request.data}?page=$page"
+            null
         }
-    ).document
+    }
 
     return newHomePageResponse(
-        list = HomePageList(
-            name = request.name,
-            list = emptyList(),
-            isHorizontalImages = false
-        ),
-        hasNext = false
+        request.name,
+        items,
+        isHorizontalImages = true
     )
 }
 
