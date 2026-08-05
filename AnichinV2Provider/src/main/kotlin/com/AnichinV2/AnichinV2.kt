@@ -2,62 +2,239 @@ package com.AnichinV2
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import org.jsoup.Jsoup
+import org.jsoup.nodes.Element
 
 class AnichinV2 : MainAPI() {
 
     override var mainUrl = "https://anichin.moe"
     override var name = "Anichin V2"
+    override val hasMainPage = true
+    override var lang = "id"
+    override val hasDownloadSupport = true
+
     override val supportedTypes = setOf(
-        TvType.Anime,
-        TvType.AnimeMovie,
-        TvType.Cartoon
+        TvType.Movie,
+        TvType.Anime
     )
 
-     override val mainPage = mainPageOf(
-    "$mainUrl/" to "Home",
-    "$mainUrl/anime/list-mode/" to "All Donghua"
-)
+    override val mainPage = mainPageOf(
+        "anime/?order=update" to "Latest Update",
+        "anime/?status=ongoing&order=update" to "Series Ongoing",
+        "anime/?status=completed&order=update" to "Series Completed",
+        "anime/?status=hiatus&order=update" to "Series Drop/Hiatus",
+        "anime/?type=movie&order=update" to "Movie"
+    )
 
     override suspend fun getMainPage(
-    page: Int,
-    request: MainPageRequest
-): HomePageResponse {
-    val document = app.get(request.data).document
+        page: Int,
+        request: MainPageRequest
+    ): HomePageResponse {
 
-    val items = document.select("a").mapNotNull { element ->
-        val href = element.attr("href")
-        val title = element.text().trim()
-        val poster = element.selectFirst("img")?.attr("src")
+        val document = app.get(
+            "${mainUrl}/${request.data}&page=$page"
+        ).document
 
-        if (
-            href.startsWith(mainUrl) &&
-            title.isNotBlank()
+        val home = document
+            .select("div.listupd > article")
+            .mapNotNull { it.toSearchResult() }
+
+        return newHomePageResponse(
+            list = HomePageList(
+                name = request.name,
+                list = home,
+                isHorizontalImages = false
+            ),
+            hasNext = true
+        )
+    }
+
+    private fun Element.toSearchResult(): SearchResponse {
+
+        val title = this
+            .select("div.bsx > a")
+            .attr("title")
+            .trim()
+
+        val href = fixUrl(
+            this.select("div.bsx > a")
+                .attr("href")
+        )
+
+        val posterUrl = fixUrlNull(
+            this.select("div.bsx > a img")
+                .attr("src")
+        )
+
+        return newAnimeSearchResponse(
+            title,
+            href,
+            TvType.Anime
         ) {
-            newAnimeSearchResponse(
-                title,
-                href,
-                TvType.Anime
-            ) {
-                this.posterUrl = poster
-            }
-        } else {
-            null
+            this.posterUrl = posterUrl
         }
     }
 
-    return newHomePageResponse(
-        request.name,
-        items,
-        false
-    )
-}
+    override suspend fun search(
+        query: String
+    ): List<SearchResponse> {
 
-    override suspend fun search(query: String): List<SearchResponse> {
-        TODO("Implement after we confirm Anichin search")
+        val searchResponse = mutableListOf<SearchResponse>()
+
+        for (i in 1..3) {
+
+            val document = app.get(
+                "${mainUrl}/page/$i/?s=$query"
+            ).document
+
+            val results = document
+                .select("div.listupd > article")
+                .mapNotNull { it.toSearchResult() }
+
+            if (results.isEmpty()) break
+
+            searchResponse.addAll(results)
+        }
+
+        return searchResponse.distinctBy {
+            it.url
+        }
     }
 
-    override suspend fun load(url: String): LoadResponse {
-        TODO("Implement after we confirm Anichin series structure")
+    override suspend fun load(
+        url: String
+    ): LoadResponse {
+
+        val document = app.get(
+            fixUrl(url)
+        ).document
+
+        val title = document
+            .selectFirst("h1.entry-title")
+            ?.text()
+            ?.trim()
+            .toString()
+
+        var poster = document
+            .select("div.ime > img")
+            .attr("src")
+
+        val description = document
+            .selectFirst("div.entry-content")
+            ?.text()
+            ?.trim()
+
+        val type = document
+            .selectFirst(".spe")
+            ?.text()
+            .orEmpty()
+
+        val tvType =
+            if (type.contains("Movie", true)) {
+                TvType.Movie
+            } else {
+                TvType.TvSeries
+            }
+
+        if (poster.isEmpty()) {
+            poster = document
+                .selectFirst("meta[property=og:image]")
+                ?.attr("content")
+                .orEmpty()
+        }
+
+        return if (tvType == TvType.TvSeries) {
+
+            val episodes = document
+                .select(".eplister li")
+                .map { ep ->
+
+                    val link = fixUrl(
+                        ep.selectFirst("a")
+                            ?.attr("href")
+                            .orEmpty()
+                    )
+
+                    val epTitle = ep
+                        .selectFirst(".epl-title")
+                        ?.text()
+                        ?.trim()
+                        .orEmpty()
+
+                    val epSub = ep
+                        .selectFirst(".epl-sub span")
+                        ?.text()
+                        ?.trim()
+                        .orEmpty()
+
+                    val epDate = ep
+                        .selectFirst(".epl-date")
+                        ?.text()
+                        ?.trim()
+                        .orEmpty()
+
+                    val cleanTitle = epTitle
+                        .replace(
+                            Regex(
+                                "Episode\\s*\\d+\\s*Subtitle Indonesia",
+                                RegexOption.IGNORE_CASE
+                            ),
+                            ""
+                        )
+                        .replace(
+                            "Subtitle Indonesia",
+                            ""
+                        )
+                        .trim()
+
+                    val name =
+                        "— $cleanTitle $epSub Indonesia"
+                            .trim()
+
+                    val desc =
+                        if (epDate.isNotEmpty()) {
+                            "Rilis: $epDate"
+                        } else {
+                            null
+                        }
+
+                    newEpisode(link) {
+                        this.name = name
+                        this.posterUrl = fixUrlNull(poster)
+                        this.description = desc
+                    }
+                }
+                .reversed()
+
+            newTvSeriesLoadResponse(
+                title,
+                url,
+                TvType.Anime,
+                episodes
+            ) {
+                this.posterUrl = fixUrlNull(poster)
+                this.plot = description
+            }
+
+        } else {
+
+            val movieHref =
+                document
+                    .selectFirst(".eplister li > a")
+                    ?.attr("href")
+                    ?.let { fixUrl(it) }
+                    ?: url
+
+            newMovieLoadResponse(
+                title,
+                movieHref,
+                TvType.Movie,
+                movieHref
+            ) {
+                this.posterUrl = fixUrlNull(poster)
+                this.plot = description
+            }
+        }
     }
 
     override suspend fun loadLinks(
@@ -66,6 +243,52 @@ class AnichinV2 : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        TODO("Implement after we confirm Anichin player structure")
+
+        val document = app.get(
+            fixUrl(data)
+        ).document
+
+        document
+            .select(".mobius option")
+            .forEach { server ->
+
+                val base64 = server.attr("value")
+
+                if (base64.isNotBlank()) {
+
+                    val decoded = base64Decode(base64)
+
+                    println("ANICHIN V2 SERVER VALUE:")
+                    println(base64)
+
+                    println("ANICHIN V2 DECODED:")
+                    println(decoded)
+
+                    val doc = Jsoup.parse(decoded)
+
+                    val iframe = doc
+                        .select("iframe")
+                        .attr("src")
+
+                    println("ANICHIN V2 IFRAME:")
+                    println(iframe)
+
+                    if (iframe.isNotBlank()) {
+
+                        val href = fixUrl(iframe)
+
+                        println("ANICHIN V2 EXTRACTOR URL:")
+                        println(href)
+
+                        loadExtractor(
+                            href,
+                            subtitleCallback,
+                            callback
+                        )
+                    }
+                }
+            }
+
+        return true
     }
 }
