@@ -54,7 +54,7 @@ class OppadramaProvider : MainAPI() {
 
     // baki code...
 }
-
+}
         val items = document
             .select("article, .item, .bs, .listupd > div")
             .mapNotNull { it.toSearchResult() }
