@@ -47,14 +47,14 @@ class OppadramaProvider : MainAPI() {
 
         val document = app.get(url).document
 
-        val items = document
-            .select(".listupd .bs")
-            .mapNotNull { it.toSearchResult() }
+val items = document
+    .select("article")
+    .mapNotNull { it.toSearchResult() }
 
-        return newHomePageResponse(
-            HomePageList(request.name, items),
-            hasNext = items.isNotEmpty()
-        )
+return newHomePageResponse(
+    HomePageList(request.name, items),
+    hasNext = items.isNotEmpty()
+)
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
