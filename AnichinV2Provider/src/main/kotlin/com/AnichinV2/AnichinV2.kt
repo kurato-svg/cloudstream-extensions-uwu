@@ -48,7 +48,7 @@ class AnichinV2 : MainAPI() {
     return newHomePageResponse(
         request.name,
         items,
-        isHorizontalImages = true
+        false
     )
 }
 
