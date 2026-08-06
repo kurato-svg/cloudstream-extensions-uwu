@@ -244,9 +244,9 @@ override suspend fun loadLinks(
     callback: (ExtractorLink) -> Unit
 ): Boolean {
 
-    val "Referer" to referer,
+    val referer = fixUrl(data)
 
-val document = app.get(referer).document
+    val document = app.get(referer).document
 
     val loadedUrls = mutableSetOf<String>()
 
