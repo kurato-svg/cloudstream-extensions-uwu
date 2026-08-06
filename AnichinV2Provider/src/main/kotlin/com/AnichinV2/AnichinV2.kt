@@ -42,6 +42,18 @@ class AnichinV2 : MainAPI() {
         }
     }
 
+    private fun Element.getImageUrl(): String? {
+    return listOf(
+        attr("data-src"),
+        attr("data-lazy-src"),
+        attr("data-original"),
+        attr("src")
+    ).firstOrNull { imageUrl ->
+        imageUrl.isNotBlank() &&
+            !imageUrl.startsWith("data:", ignoreCase = true)
+    }
+    }
+
     override suspend fun getMainPage(
         page: Int,
         request: MainPageRequest
@@ -76,10 +88,9 @@ class AnichinV2 : MainAPI() {
                 .attr("href")
         )
 
-        val posterUrl = fixUrlNull(
-            select("div.bsx > a img")
-                .attr("src")
-        )
+        val posterUrl = selectFirst("div.bsx > a img")
+    ?.getImageUrl()
+    ?.let { fixUrlNull(it) }
 
         return newAnimeSearchResponse(
             title,
@@ -128,14 +139,15 @@ class AnichinV2 : MainAPI() {
             ?.trim()
             .orEmpty()
 
-        var poster = document
-    .selectFirst("div.ime img")
-    ?.let {
-        it.attr("src")
-            .ifBlank { it.attr("data-src") }
-            .ifBlank { it.attr("data-lazy-src") }
-    }
-    .orEmpty()
+        val poster = (
+    document
+        .selectFirst("div.thumb img, div.ime img, img.wp-post-image")
+        ?.getImageUrl()
+        ?: document
+            .selectFirst("meta[property=og:image]")
+            ?.attr("content")
+            ?.trim()
+).orEmpty()
 
         val description = document
             .selectFirst("div.entry-content")
@@ -191,6 +203,12 @@ class AnichinV2 : MainAPI() {
                         ?.trim()
                         .orEmpty()
 
+                    val episodePoster = episodeElement
+    .selectFirst("a img")
+    ?.getImageUrl()
+    ?.let { fixUrlNull(it) }
+    ?: fixUrlNull(poster)
+
                     val cleanTitle = episodeTitle
                         .replace(
                             Regex(
@@ -214,9 +232,9 @@ class AnichinV2 : MainAPI() {
                             ?.let { "Rilis: $it" }
 
                     newEpisode(link) {
-                        this.name = episodeName
-                        this.posterUrl = fixUrlNull(poster)
-                        this.description = episodeDescription
+    this.name = episodeName
+    this.posterUrl = episodePoster
+    this.description = episodeDescription
                     }
                 }
                 .reversed()
