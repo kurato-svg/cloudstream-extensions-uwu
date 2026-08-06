@@ -244,7 +244,9 @@ override suspend fun loadLinks(
     callback: (ExtractorLink) -> Unit
 ): Boolean {
 
-    val document = app.get(fixUrl(data)).document
+    val "Referer" to referer,
+
+val document = app.get(referer).document
 
     val loadedUrls = mutableSetOf<String>()
 
@@ -280,8 +282,16 @@ streamDoc.select("iframe[src]").forEach {
 
     val src = fixUrl(it.attr("src"))
 
-    if (src.isNotBlank())
-        urls.add(src)
+if (
+    src.contains("ok.ru", true) ||
+    src.contains("rumble", true) ||
+    src.contains("vidguard", true) ||
+    src.contains("streamruby", true) ||
+    src.contains("dood", true) ||
+    src.contains("dailymotion", true)
+) {
+    urls.add(src)
+}
 
     runCatching {
 
@@ -308,7 +318,6 @@ streamDoc.select("iframe[src]").forEach {
 
             urls
     .filter { it.isNotBlank() }
-    .distinct()
     .forEach { url ->
 
         if (!loadedUrls.add(url))
