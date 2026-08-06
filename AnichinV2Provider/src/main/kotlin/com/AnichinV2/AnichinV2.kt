@@ -3,6 +3,7 @@ package com.AnichinV2
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
 class AnichinV2 : MainAPI() {
@@ -12,11 +13,7 @@ class AnichinV2 : MainAPI() {
     override val hasMainPage = true
     override var lang = "id"
     override val hasDownloadSupport = true
-
-    override val supportedTypes = setOf(
-        TvType.Movie,
-        TvType.Anime
-    )
+    override val supportedTypes = setOf(TvType.Movie, TvType.Anime)
 
     override val mainPage = mainPageOf(
         "anime/?order=update" to "Latest Update",
@@ -27,238 +24,185 @@ class AnichinV2 : MainAPI() {
     )
 
     private val supportedVideoHosts = setOf(
-    "ok.ru",
-    "odnoklassniki",
-    "rumble.com",
-    "vidguard",
-    "streamruby",
-    "dood",
-    "dailymotion"
-)
+        "ok.ru",
+        "odnoklassniki",
+        "rumble.com",
+        "vidguard",
+        "streamruby",
+        "dood",
+        "dailymotion"
+    )
 
-    private fun isSupportedVideoHost(url: String): Boolean {
-        return supportedVideoHosts.any { host ->
-            url.contains(host, ignoreCase = true)
-        }
-    }
+    private fun isSupportedVideoHost(url: String) =
+        supportedVideoHosts.any { url.contains(it, ignoreCase = true) }
 
-    private fun Element.getImageUrl(): String? {
-    return listOf(
-        attr("data-src"),
-        attr("data-lazy-src"),
-        attr("data-original"),
-        attr("src")
-    ).firstOrNull { imageUrl ->
-        imageUrl.isNotBlank() &&
-            !imageUrl.startsWith("data:", ignoreCase = true)
-    }
-    }
+    private fun Element.getImageUrl(): String? =
+        sequenceOf("data-src", "data-lazy-src", "data-original", "src")
+            .map { attr(it).trim() }
+            .firstOrNull { it.isNotBlank() && !it.startsWith("data:", true) }
+
+    private fun Document.getPoster(): String =
+        selectFirst("div.thumb img, div.ime img, img.wp-post-image")
+            ?.getImageUrl()
+            ?: selectFirst("meta[property=og:image]")
+                ?.attr("content")
+                ?.trim()
+                .orEmpty()
+
+    private fun Document.getIframeUrls(): List<String> =
+        select("iframe[src]")
+            .mapNotNull { iframe ->
+                iframe.attr("src")
+                    .trim()
+                    .takeIf { it.isNotBlank() }
+                    ?.let { fixUrl(it) }
+            }
+            .distinct()
+
+    private suspend fun getDocument(
+        url: String,
+        referer: String,
+        includeOrigin: Boolean = false
+    ): Document? = runCatching {
+        val headers = mutableMapOf(
+            "Referer" to referer,
+            "User-Agent" to USER_AGENT
+        )
+        if (includeOrigin) headers["Origin"] = mainUrl
+        app.get(url, headers = headers).document
+    }.getOrNull()
 
     override suspend fun getMainPage(
         page: Int,
         request: MainPageRequest
     ): HomePageResponse {
-
-        val document = app.get(
-            "${mainUrl}/${request.data}&page=$page"
+        val home = app.get(
+            "$mainUrl/${request.data}&page=$page"
         ).document
-
-        val home = document
             .select("div.listupd > article")
             .mapNotNull { it.toSearchResult() }
 
         return newHomePageResponse(
-            list = HomePageList(
-                name = request.name,
-                list = home,
-                isHorizontalImages = false
-            ),
+            HomePageList(request.name, home, false),
             hasNext = true
         )
     }
 
-    private fun Element.toSearchResult(): SearchResponse {
+    private fun Element.toSearchResult(): SearchResponse? {
+        val anchor = selectFirst("div.bsx > a") ?: return null
+        val title = anchor.attr("title").trim()
+        val href = anchor.attr("href").trim()
+        if (title.isBlank() || href.isBlank()) return null
 
-        val title = select("div.bsx > a")
-            .attr("title")
-            .trim()
-
-        val href = fixUrl(
-            select("div.bsx > a")
-                .attr("href")
-        )
-
-        val posterUrl = selectFirst("div.bsx > a img")
-    ?.getImageUrl()
-    ?.let { fixUrlNull(it) }
-
-        return newAnimeSearchResponse(
-            title,
-            href,
-            TvType.Anime
-        ) {
-            this.posterUrl = posterUrl
+        return newAnimeSearchResponse(title, fixUrl(href), TvType.Anime) {
+            posterUrl = anchor.selectFirst("img")
+                ?.getImageUrl()
+                ?.let { fixUrlNull(it) }
         }
     }
 
-    override suspend fun search(
-        query: String
-    ): List<SearchResponse> {
-
-        val searchResponse = mutableListOf<SearchResponse>()
+    override suspend fun search(query: String): List<SearchResponse> {
+        val results = mutableListOf<SearchResponse>()
 
         for (page in 1..3) {
-
-            val document = app.get(
-                "${mainUrl}/page/$page/?s=$query"
+            val pageResults = app.get(
+                "$mainUrl/page/$page/?s=$query"
             ).document
+                .select("div.listupd > article")
+                .mapNotNull { it.toSearchResult() }
 
-            val results = document
-    .select("div.listupd > article")
-    .mapNotNull { it.toSearchResult() }
-
-            if (results.isEmpty()) break
-
-            searchResponse.addAll(results)
+            if (pageResults.isEmpty()) break
+            results.addAll(pageResults)
         }
 
-        return searchResponse.distinctBy { it.url }
+        return results.distinctBy { it.url }
     }
 
-    override suspend fun load(
-        url: String
-    ): LoadResponse {
-
-        val document = app.get(
-            fixUrl(url)
-        ).document
-
-        val title = document
-            .selectFirst("h1.entry-title")
+    override suspend fun load(url: String): LoadResponse {
+        val document = app.get(fixUrl(url)).document
+        val title = document.selectFirst("h1.entry-title")
             ?.text()
             ?.trim()
             .orEmpty()
-
-        val poster = (
-    document
-        .selectFirst("div.thumb img, div.ime img, img.wp-post-image")
-        ?.getImageUrl()
-        ?: document
-            .selectFirst("meta[property=og:image]")
-            ?.attr("content")
-            ?.trim()
-).orEmpty()
-
-        val description = document
-            .selectFirst("div.entry-content")
+        val poster = document.getPoster()
+        val description = document.selectFirst("div.entry-content")
             ?.text()
             ?.trim()
-
-        val type = document
-            .selectFirst(".spe")
+        val isMovie = document.selectFirst(".spe")
             ?.text()
             .orEmpty()
+            .contains("Movie", ignoreCase = true)
 
-        val tvType = if (type.contains("Movie", true)) {
-            TvType.Movie
-        } else {
-            TvType.TvSeries
-        }
-
-        return if (tvType == TvType.TvSeries) {
-
-            val episodes = document
-                .select(".eplister li")
-                .map { episodeElement ->
-
-                    val link = fixUrl(
-                        episodeElement
-                            .selectFirst("a")
-                            ?.attr("href")
-                            .orEmpty()
-                    )
-
-                    val episodeTitle = episodeElement
-                        .selectFirst(".epl-title")
-                        ?.text()
-                        ?.trim()
-                        .orEmpty()
-
-                    val episodeSub = episodeElement
-                        .selectFirst(".epl-sub span")
-                        ?.text()
-                        ?.trim()
-                        .orEmpty()
-
-                    val episodeDate = episodeElement
-                        .selectFirst(".epl-date")
-                        ?.text()
-                        ?.trim()
-                        .orEmpty()
-
-                    val episodePoster = episodeElement
-    .selectFirst("a img")
-    ?.getImageUrl()
-    ?.let { fixUrlNull(it) }
-    ?: fixUrlNull(poster)
-
-                    val cleanTitle = episodeTitle
-                        .replace(
-                            Regex(
-                                "Episode\\s*\\d+\\s*Subtitle Indonesia",
-                                RegexOption.IGNORE_CASE
-                            ),
-                            ""
-                        )
-                        .replace(
-                            "Subtitle Indonesia",
-                            ""
-                        )
-                        .trim()
-
-                    val episodeName =
-                        "- $cleanTitle $episodeSub Indonesia".trim()
-
-                    val episodeDescription =
-                        episodeDate
-                            .takeIf { it.isNotEmpty() }
-                            ?.let { "Rilis: $it" }
-
-                    newEpisode(link) {
-    this.name = episodeName
-    this.posterUrl = episodePoster
-    this.description = episodeDescription
-                    }
-                }
-                .reversed()
-
-            newTvSeriesLoadResponse(
-                title,
-                url,
-                TvType.Anime,
-                episodes
-            ) {
-                this.posterUrl = fixUrlNull(poster)
-                this.plot = description
-            }
-
-        } else {
-
-            val movieHref = document
-                .selectFirst(".eplister li > a")
+        if (isMovie) {
+            val movieUrl = document.selectFirst(".eplister li > a")
                 ?.attr("href")
                 ?.let { fixUrl(it) }
                 ?: url
 
-            newMovieLoadResponse(
+            return newMovieLoadResponse(
                 title,
-                movieHref,
+                movieUrl,
                 TvType.Movie,
-                movieHref
+                movieUrl
             ) {
-                this.posterUrl = fixUrlNull(poster)
-                this.plot = description
+                posterUrl = fixUrlNull(poster)
+                plot = description
             }
+        }
+
+        val episodes = document.select(".eplister li")
+            .map { element ->
+                val episodeUrl = fixUrl(
+                    element.selectFirst("a")
+                        ?.attr("href")
+                        .orEmpty()
+                )
+                val episodeTitle = element.selectFirst(".epl-title")
+                    ?.text()
+                    ?.trim()
+                    .orEmpty()
+                val episodeSub = element.selectFirst(".epl-sub span")
+                    ?.text()
+                    ?.trim()
+                    .orEmpty()
+                val episodeDate = element.selectFirst(".epl-date")
+                    ?.text()
+                    ?.trim()
+                    .orEmpty()
+                val episodePoster = element.selectFirst("a img")
+                    ?.getImageUrl()
+                    ?.let { fixUrlNull(it) }
+                    ?: fixUrlNull(poster)
+
+                val cleanTitle = episodeTitle
+                    .replace(
+                        Regex(
+                            "Episode\\s*\\d+\\s*Subtitle Indonesia",
+                            RegexOption.IGNORE_CASE
+                        ),
+                        ""
+                    )
+                    .replace("Subtitle Indonesia", "", ignoreCase = true)
+                    .trim()
+
+                newEpisode(episodeUrl) {
+                    name = "- $cleanTitle $episodeSub Indonesia".trim()
+                    posterUrl = episodePoster
+                    description = episodeDate
+                        .takeIf { it.isNotBlank() }
+                        ?.let { "Rilis: $it" }
+                }
+            }
+            .reversed()
+
+        return newTvSeriesLoadResponse(
+            title,
+            url,
+            TvType.Anime,
+            episodes
+        ) {
+            posterUrl = fixUrlNull(poster)
+            plot = description
         }
     }
 
@@ -268,117 +212,67 @@ class AnichinV2 : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-
         val episodeUrl = fixUrl(data)
-        val document = app.get(episodeUrl).document
         val loadedUrls = mutableSetOf<String>()
 
-        document.select(".mobius option").forEach optionLoop@ { option ->
+        app.get(episodeUrl).document
+            .select(".mobius option")
+            .forEach optionLoop@ { option ->
+                val encoded = option.attr("value").trim()
+                if (encoded.isBlank()) return@optionLoop
 
-            val encodedValue = option.attr("value").trim()
-            if (encodedValue.isBlank()) return@optionLoop
-
-            val decodedDocument = runCatching {
-                Jsoup.parse(base64Decode(encodedValue))
-            }.getOrNull() ?: return@optionLoop
-
-            val firstIframe = decodedDocument
-                .selectFirst("iframe[src]")
-                ?.attr("src")
-                ?.trim()
-                .orEmpty()
-
-            if (firstIframe.isBlank()) return@optionLoop
-
-            val streamUrl = fixUrl(firstIframe)
-
-            /*
-             * Store each extractor URL together with its correct referer.
-             * LinkedHashMap keeps the website order and removes duplicates.
-             */
-            val candidates = linkedMapOf<String, String>()
-
-            if (isSupportedVideoHost(streamUrl)) {
-                candidates[streamUrl] = episodeUrl
-            } else {
-                val streamDocument = runCatching {
-                    app.get(
-                        streamUrl,
-                        headers = mapOf(
-                            "Referer" to episodeUrl,
-                            "Origin" to mainUrl,
-                            "User-Agent" to USER_AGENT
-                        )
-                    ).document
+                val streamUrl = runCatching {
+                    Jsoup.parse(base64Decode(encoded))
+                        .selectFirst("iframe[src]")
+                        ?.attr("src")
+                        ?.trim()
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { fixUrl(it) }
                 }.getOrNull() ?: return@optionLoop
 
-                streamDocument
-                    .select("iframe[src]")
-                    .forEach iframeLoop@ { iframe ->
+                val candidates = linkedMapOf<String, String>()
 
-                        val iframeValue = iframe.attr("src").trim()
-                        if (iframeValue.isBlank()) return@iframeLoop
+                if (isSupportedVideoHost(streamUrl)) {
+                    candidates[streamUrl] = episodeUrl
+                } else {
+                    val streamDocument = getDocument(
+                        streamUrl,
+                        episodeUrl,
+                        includeOrigin = true
+                    ) ?: return@optionLoop
 
-                        val playerUrl = fixUrl(iframeValue)
-
+                    streamDocument.getIframeUrls().forEach playerLoop@ { playerUrl ->
                         if (isSupportedVideoHost(playerUrl)) {
                             candidates[playerUrl] = streamUrl
-                            return@iframeLoop
+                            return@playerLoop
                         }
 
-                        /*
-                         * Only open one wrapper level. This keeps loading fast
-                         * while still finding nested OkRu, Rumble, VidGuard,
-                         * StreamRuby and Dood embeds.
-                         */
-                        val nestedDocument = runCatching {
-                            app.get(
-                                playerUrl,
-                                headers = mapOf(
-                                    "Referer" to streamUrl,
-                                    "User-Agent" to USER_AGENT
-                                )
-                            ).document
-                        }.getOrNull() ?: return@iframeLoop
+                        val nestedDocument = getDocument(
+                            playerUrl,
+                            streamUrl
+                        ) ?: return@playerLoop
 
-                        nestedDocument
-                            .select("iframe[src]")
-                            .forEach nestedLoop@ { nested ->
-
-                                val nestedValue =
-                                    nested.attr("src").trim()
-
-                                if (nestedValue.isBlank()) {
-                                    return@nestedLoop
-                                }
-
-                                val nestedUrl = fixUrl(nestedValue)
-
-                                if (isSupportedVideoHost(nestedUrl)) {
-                                    candidates[nestedUrl] = playerUrl
-                                }
+                        nestedDocument.getIframeUrls()
+                            .filter(::isSupportedVideoHost)
+                            .forEach { nestedUrl ->
+                                candidates[nestedUrl] = playerUrl
                             }
                     }
-            }
-
-            candidates.forEach candidateLoop@ { (url, referer) ->
-
-                if (!loadedUrls.add(url)) {
-                    return@candidateLoop
                 }
 
-                runCatching {
-    loadExtractor(
-        url,
-        referer,
-        subtitleCallback,
-        callback
-    )
-}.onFailure {
-    // ignore failed extractor
-}
+                candidates.forEach candidateLoop@ { (url, referer) ->
+                    if (!loadedUrls.add(url)) return@candidateLoop
+
+                    runCatching {
+                        loadExtractor(
+                            url,
+                            referer,
+                            subtitleCallback,
+                            callback
+                        )
+                    }
+                }
             }
-        }
 
         return true
     }
