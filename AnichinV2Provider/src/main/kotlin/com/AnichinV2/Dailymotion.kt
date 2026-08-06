@@ -55,9 +55,9 @@ open class Dailymotion : ExtractorApi() {
             .map { it.groupValues[1] }
             .filter { it.contains(".m3u8") }
             .distinct()
+            .sortedDescending()
 
         urls.forEach { streamUrl ->
-
             getStream(
                 streamUrl,
                 callback
@@ -134,18 +134,16 @@ open class Dailymotion : ExtractorApi() {
         callback: (ExtractorLink) -> Unit
     ) {
 
-        val visited = mutableSetOf<String>()
-
         generateM3u8(
             "DailyMotion",
             streamLink,
             ""
         )
             .filter {
-                visited.add(it.url)
-            }
-            .filter {
                 it.quality >= 720
+            }
+            .distinctBy {
+                "${it.quality}-${it.url}"
             }
             .sortedByDescending {
                 it.quality
