@@ -318,6 +318,24 @@ println("====================================")
                  * Some servers return another iframe here,
                  * for example OK.ru / Dailymotion.
                  */
+                 // Try extractor directly first (Anichin X style)
+try {
+    println("ANICHIN V2 DIRECT EXTRACTOR:")
+    println(fixedPlayerUrl)
+
+    loadExtractor(
+        fixedPlayerUrl,
+        streamUrl,
+        subtitleCallback,
+        callback
+    )
+
+    println("ANICHIN V2 DIRECT DONE:")
+    println(fixedPlayerUrl)
+
+} catch (e: Exception) {
+    println("ANICHIN V2 DIRECT ERROR: ${e.message}")
+}
 
                 try {
 
