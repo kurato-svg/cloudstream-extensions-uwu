@@ -27,14 +27,14 @@ class AnichinV2 : MainAPI() {
     )
 
     private val supportedVideoHosts = listOf(
-        "ok.ru",
-        "odnoklassniki",
-        "rumble.com",
-        "vidguard",
-        "streamruby",
-        "dood"
-        "dailymotion"
-    )
+    "ok.ru",
+    "odnoklassniki",
+    "rumble.com",
+    "vidguard",
+    "streamruby",
+    "dood",
+    "dailymotion"
+)
 
     private fun isSupportedVideoHost(url: String): Boolean {
         return supportedVideoHosts.any { host ->
@@ -53,7 +53,7 @@ class AnichinV2 : MainAPI() {
 
         val home = document
             .select("div.listupd > article")
-            .map { it.toSearchResult() }
+            .mapNotNull { it.toSearchResult() }
 
         return newHomePageResponse(
             list = HomePageList(
@@ -352,15 +352,15 @@ class AnichinV2 : MainAPI() {
                 }
 
                 runCatching {
-                    loadExtractor(
-                        url,
-                        referer,
-                        subtitleCallback,
-                        callback
-                    )
-                }.onFailure {
-    // Ignore extractor failure
-                }
+    loadExtractor(
+        url,
+        referer,
+        subtitleCallback,
+        callback
+    )
+}.onFailure {
+    // ignore failed extractor
+}
             }
         }
 
