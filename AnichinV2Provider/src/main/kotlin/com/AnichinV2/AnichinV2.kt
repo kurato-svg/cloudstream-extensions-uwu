@@ -115,9 +115,17 @@ override suspend fun load(
         ?.trim()  
         .toString()  
 
-    var poster = document  
-        .select("div.ime > img")  
-        .attr("src")  
+    // --- PEMBETULAN DI SINI ---
+    val posterImg = document.selectFirst("div.ime > img")
+    var poster = posterImg?.attr("data-src")?.ifEmpty { posterImg.attr("src") }
+        
+    if (poster.isNullOrEmpty()) {  
+        poster = document  
+            .selectFirst("meta[property=og:image]")  
+            ?.attr("content")  
+            .orEmpty()  
+    }  
+    // ---------------------------
 
     val description = document  
         .selectFirst("div.entry-content")  
@@ -135,13 +143,6 @@ override suspend fun load(
         } else {  
             TvType.TvSeries  
         }  
-
-    if (poster.isEmpty()) {  
-        poster = document  
-            .selectFirst("meta[property=og:image]")  
-            ?.attr("content")  
-            .orEmpty()  
-    }  
 
     return if (tvType == TvType.TvSeries) {  
 
@@ -187,9 +188,7 @@ override suspend fun load(
                     )  
                     .trim()  
 
-                val name =  
-                    "— $cleanTitle $epSub Indonesia"  
-                        .trim()  
+                val name = "— $cleanTitle $epSub Indonesia".trim()  
 
                 val desc =  
                     if (epDate.isNotEmpty()) {  
@@ -235,7 +234,8 @@ override suspend fun load(
             this.plot = description  
         }  
     }  
-}  
+}
+
 
 override suspend fun loadLinks(  
     data: String,  
