@@ -306,7 +306,9 @@ streamDoc.select("iframe[src]").forEach {
     }
 }
 
-            urls.forEach { url ->
+            urls
+    .distinct()
+    .forEach { url ->
 
                 if (loadedUrls.add(url)) {
 
