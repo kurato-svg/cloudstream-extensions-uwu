@@ -18,14 +18,6 @@ class AnichinV2 : MainAPI() {
         TvType.Anime  
     )  
 
-    // Header khas untuk memastikan pelayan imej Anichin tidak menyekat paparan gambar (Hotlink Protection)
-    override fun getImageHeaders(): Map<String, String> {
-        return mapOf(
-            "Referer" to "$mainUrl/",
-            "User-Agent" to USER_AGENT
-        )
-    }
-
     override val mainPage = mainPageOf(  
         "anime/?order=update" to "Latest Update",  
         "anime/?status=ongoing&order=update" to "Series Ongoing",  
@@ -125,7 +117,7 @@ class AnichinV2 : MainAPI() {
             ?.trim()  
             .orEmpty()  
 
-        // Carian poster berlapis (data-src, data-lazy-src, src, srcset, atau og:image)
+        // Semak pelbagai lokasi kemungkinan imej poster disimpan
         val posterImg = document.selectFirst("div.ime > img")  
             ?: document.selectFirst("div.thumb > img")
             
@@ -341,7 +333,7 @@ class AnichinV2 : MainAPI() {
                 }  
 
             } catch (e: Exception) {  
-                // Log error if needed
+                // Ignore errors
             }  
         }  
 
