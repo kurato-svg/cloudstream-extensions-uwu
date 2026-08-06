@@ -319,7 +319,18 @@ val serverName = server.text().trim()
              * Some servers return another iframe here,  
              * for example OK.ru / Dailymotion.  
              */  
+             
+try {
 
+    loadExtractor(
+        fixedPlayerUrl,
+        streamUrl,
+        subtitleCallback,
+        callback
+    )
+
+} catch (_: Exception) {
+}
             try {  
 
                 val playerResponse = app.get(  
@@ -336,27 +347,18 @@ val serverName = server.text().trim()
                     ?.trim()  
                     .orEmpty()  
 
-                if (realEmbedUrl.isNotBlank()) {  
+                if (realEmbedUrl.isNotBlank()) {
 
-                    val fixedEmbedUrl = fixUrl(realEmbedUrl)  
+    val fixedEmbedUrl = fixUrl(realEmbedUrl)
 
-                    println("ANICHIN V2 REAL EMBED:")  
-                    println(fixedEmbedUrl)  
-
-                    println("ANICHIN V2 CALLING EXTRACTOR:")  
-                    println(fixedEmbedUrl)  
-
-                    loadExtractor(  
-                        fixedEmbedUrl,  
-                        fixedPlayerUrl,  
-                        subtitleCallback,  
-                        callback  
-                    )  
-
-                    println("ANICHIN V2 EXTRACTOR FINISHED:")  
-                    println(fixedEmbedUrl)  
-
-                } else {  
+    loadExtractor(
+        fixedEmbedUrl,
+        fixedPlayerUrl,
+        subtitleCallback,
+        callback
+    )
+} 
+                else {  
 
                     /*  
                      * No second iframe.  
