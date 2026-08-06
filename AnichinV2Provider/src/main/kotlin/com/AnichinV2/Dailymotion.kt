@@ -14,12 +14,15 @@ class Geodailymotion : Dailymotion() {
 }
 
 open class Dailymotion : ExtractorApi() {
+
     override val mainUrl = "https://www.dailymotion.com"
     override val name = "Dailymotion"
     override val requiresReferer = false
+
     private val baseUrl = "https://www.dailymotion.com"
 
-    private val videoIdRegex = "^[kx][a-zA-Z0-9]+$".toRegex()
+    private val videoIdRegex =
+        "^[kx][a-zA-Z0-9]+$".toRegex()
 
     override suspend fun getUrl(
         url: String,
@@ -27,53 +30,126 @@ open class Dailymotion : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
+
         val embedUrl = getEmbedUrl(url) ?: return
         val id = getVideoId(embedUrl) ?: return
-        val metaDataUrl = "$baseUrl/player/metadata/video/$id"
-        val response = app.get(metaDataUrl, referer = embedUrl).text
-        val qualityUrlRegex = Regex(""""url"\s*:\s*"([^"]+)"""")
-        val subtitlesRegex = Regex(""""subtitles"\s*:\s*\{[^}]*"data"\s*:\s*(\[[^\]]*\])""")
 
-        val urls = qualityUrlRegex.findAll(response)
+        val metaDataUrl =
+            "$baseUrl/player/metadata/video/$id"
+
+        val response = app.get(
+            metaDataUrl,
+            referer = embedUrl
+        ).text
+
+        val qualityUrlRegex =
+            Regex(""""url"\s*:\s*"([^"]+)"""")
+
+        val subtitlesRegex =
+            Regex(
+                """"subtitles"\s*:\s*\{[^}]*"data"\s*:\s*(\[[^\]]*\])"""
+            )
+
+        val urls = qualityUrlRegex
+            .findAll(response)
             .map { it.groupValues[1] }
-            .toList().filter { it.contains(".m3u8") }
+            .filter { it.contains(".m3u8") }
+            .distinct()
 
-        urls.forEach { videoUrl ->
-            getStream(videoUrl, this.name, callback)
+        urls.forEach { streamUrl ->
+
+            getStream(
+                streamUrl,
+                callback
+            )
         }
 
-        val subtitlesMatches = subtitlesRegex.findAll(response).map { it.groupValues[1] }.toList()
-        subtitlesMatches.forEach { subtitleJson ->
-            val subRegex = Regex("""\{\s*"label"\s*:\s*"([^"]+)",\s*"urls"\s*:\s*\["([^"]+)"""")
-            subRegex.findAll(subtitleJson).forEach { match ->
-                val label = match.groupValues[1]
-                val subUrl = match.groupValues[2]
-                
-                subtitleCallback(newSubtitleFile(label, subUrl))
+        subtitlesRegex
+            .findAll(response)
+            .map { it.groupValues[1] }
+            .forEach { subtitleJson ->
+
+                val subRegex =
+                    Regex(
+                        """\{\s*"label"\s*:\s*"([^"]+)",\s*"urls"\s*:\s*\["([^"]+)"""
+                    )
+
+                subRegex.findAll(subtitleJson)
+                    .forEach {
+
+                        subtitleCallback(
+                            newSubtitleFile(
+                                it.groupValues[1],
+                                it.groupValues[2]
+                            )
+                        )
+                    }
             }
-        }
     }
 
-    private fun getEmbedUrl(url: String): String? {
-        if (url.contains("/embed/") || url.contains("/video/")) return url
-        if (url.contains("geo.dailymotion.com")) {
-            val videoId = url.substringAfter("video=")
+    private fun getEmbedUrl(
+        url: String
+    ): String? {
+
+        if (
+            url.contains("/embed/") ||
+            url.contains("/video/")
+        ) {
+            return url
+        }
+
+        if (
+            url.contains("geo.dailymotion.com")
+        ) {
+
+            val videoId =
+                url.substringAfter("video=")
+
             return "$baseUrl/embed/video/$videoId"
         }
+
         return null
     }
 
-    private fun getVideoId(url: String): String? {
+    private fun getVideoId(
+        url: String
+    ): String? {
+
         val path = URI(url).path
-        val id = path.substringAfter("/video/")
-        return if (id.matches(videoIdRegex)) id else null
+
+        val id =
+            path.substringAfter("/video/")
+
+        return if (
+            id.matches(videoIdRegex)
+        ) {
+            id
+        } else {
+            null
+        }
     }
 
     private suspend fun getStream(
         streamLink: String,
-        name: String,
         callback: (ExtractorLink) -> Unit
     ) {
-        return generateM3u8(name, streamLink, "").forEach(callback)
+
+        val visited = mutableSetOf<String>()
+
+        generateM3u8(
+            "DailyMotion",
+            streamLink,
+            ""
+        )
+            .filter {
+                visited.add(it.url)
+            }
+            .filter {
+                it.quality >= 720
+            }
+            .sortedByDescending {
+                it.quality
+            }
+            .forEach(callback)
     }
-                                 }
+                  }
