@@ -165,13 +165,6 @@ class AnichinV2 : MainAPI() {
             TvType.TvSeries
         }
 
-        if (poster.isEmpty()) {
-            poster = document
-                .selectFirst("meta[property=og:image]")
-                ?.attr("content")
-                .orEmpty()
-        }
-
         return if (tvType == TvType.TvSeries) {
 
             val episodes = document
