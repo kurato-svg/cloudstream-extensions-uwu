@@ -249,7 +249,9 @@ override suspend fun loadLinks(
     ).document  
 
     document.select(".mobius option").forEach { server ->  
-         
+
+println("SERVER = ${server.text()}")
+        
         println("========== ANICHIN SERVER ==========")
 
 println("SERVER: ${server.text().trim()}")
@@ -270,6 +272,7 @@ val serverName = server.text().trim()
         try {  
 
             val decoded = base64Decode(base64)  
+            println(decoded)
             val doc = Jsoup.parse(decoded)  
 
             val iframe = doc  
