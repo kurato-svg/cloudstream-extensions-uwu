@@ -26,7 +26,7 @@ class AnichinV2 : MainAPI() {
         "anime/?type=movie&order=update" to "Movie"
     )
 
-    private val supportedVideoHosts = listOf(
+    private val supportedVideoHosts = setOf(
     "ok.ru",
     "odnoklassniki",
     "rumble.com",
