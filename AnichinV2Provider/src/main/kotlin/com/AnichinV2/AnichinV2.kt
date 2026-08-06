@@ -33,6 +33,7 @@ class AnichinV2 : MainAPI() {
         "vidguard",
         "streamruby",
         "dood"
+        "dailymotion"
     )
 
     private fun isSupportedVideoHost(url: String): Boolean {
@@ -357,6 +358,8 @@ class AnichinV2 : MainAPI() {
                         subtitleCallback,
                         callback
                     )
+                }.onFailure {
+    // Ignore extractor failure
                 }
             }
         }
