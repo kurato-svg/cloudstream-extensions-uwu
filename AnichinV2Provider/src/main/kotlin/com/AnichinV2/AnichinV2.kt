@@ -129,8 +129,13 @@ class AnichinV2 : MainAPI() {
             .orEmpty()
 
         var poster = document
-            .select("div.ime > img")
-            .attr("src")
+    .selectFirst("div.ime img")
+    ?.let {
+        it.attr("src")
+            .ifBlank { it.attr("data-src") }
+            .ifBlank { it.attr("data-lazy-src") }
+    }
+    .orEmpty()
 
         val description = document
             .selectFirst("div.entry-content")
