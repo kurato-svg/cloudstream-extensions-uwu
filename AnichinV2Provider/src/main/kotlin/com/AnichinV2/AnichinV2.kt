@@ -3,75 +3,28 @@ package com.AnichinV2
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.Jsoup
-import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
 class AnichinV2 : MainAPI() {
 
-    companion object {
+override var mainUrl = "https://anichin.moe"  
+override var name = "Anichin V2"  
+override val hasMainPage = true  
+override var lang = "id"  
+override val hasDownloadSupport = true  
 
-        private val REQUEST_HEADERS = mapOf(
-            "Origin" to "https://anichin.moe",
-            "User-Agent" to USER_AGENT
-        )
-    }
+override val supportedTypes = setOf(  
+    TvType.Movie,  
+    TvType.Anime  
+)  
 
-    override var mainUrl = "https://anichin.moe"
-    override var name = "Anichin V2"
-    override val hasMainPage = true
-    override var lang = "id"
-    override val hasDownloadSupport = true  
-
-override val supportedTypes = setOf(
-    TvType.Movie,
-    TvType.Anime
-)
-
-override val mainPage = mainPageOf(
-    "anime/?order=update" to "Latest Update",
-    "anime/?status=ongoing&order=update" to "Series Ongoing",
-    "anime/?status=completed&order=update" to "Series Completed",
-    "anime/?status=hiatus&order=update" to "Series Drop/Hiatus",
-    "anime/?type=movie&order=update" to "Movie"
-)
-
-private fun decodePlayer(value: String): Document? {
-
-    if (value.isBlank()) return null
-
-    return runCatching {
-        Jsoup.parse(base64Decode(value))
-    }.getOrNull()
-}
-
-private fun extractIframes(document: Document): List<String> {
-
-    return document
-        .select("iframe[src]")
-        .mapNotNull {
-            it.attr("src")
-                .trim()
-                .takeIf(String::isNotBlank)
-        }
-        .distinct()
-}
-
-private suspend fun getDocument(
-    url: String,
-    referer: String
-): Document? {
-
-    return runCatching {
-
-        app.get(
-            fixUrl(url),
-            headers = REQUEST_HEADERS + mapOf(
-                "Referer" to referer
-            )
-        ).document
-
-    }.getOrNull()
-}
+override val mainPage = mainPageOf(  
+    "anime/?order=update" to "Latest Update",  
+    "anime/?status=ongoing&order=update" to "Series Ongoing",  
+    "anime/?status=completed&order=update" to "Series Completed",  
+    "anime/?status=hiatus&order=update" to "Series Drop/Hiatus",  
+    "anime/?type=movie&order=update" to "Movie"  
+)  
 
 override suspend fun getMainPage(  
     page: Int,  
@@ -296,9 +249,7 @@ override suspend fun loadLinks(
     ).document  
 
     document.select(".mobius option").forEach { server ->  
-
-println("SERVER = ${server.text()}")
-        
+         
         println("========== ANICHIN SERVER ==========")
 
 println("SERVER: ${server.text().trim()}")
@@ -319,7 +270,6 @@ val serverName = server.text().trim()
         try {  
 
             val decoded = base64Decode(base64)  
-            println(decoded)
             val doc = Jsoup.parse(decoded)  
 
             val iframe = doc  
@@ -369,18 +319,7 @@ val serverName = server.text().trim()
              * Some servers return another iframe here,  
              * for example OK.ru / Dailymotion.  
              */  
-             
-try {
 
-    loadExtractor(
-        fixedPlayerUrl,
-        streamUrl,
-        subtitleCallback,
-        callback
-    )
-
-} catch (_: Exception) {
-}
             try {  
 
                 val playerResponse = app.get(  
@@ -397,18 +336,27 @@ try {
                     ?.trim()  
                     .orEmpty()  
 
-                if (realEmbedUrl.isNotBlank()) {
+                if (realEmbedUrl.isNotBlank()) {  
 
-    val fixedEmbedUrl = fixUrl(realEmbedUrl)
+                    val fixedEmbedUrl = fixUrl(realEmbedUrl)  
 
-    loadExtractor(
-        fixedEmbedUrl,
-        fixedPlayerUrl,
-        subtitleCallback,
-        callback
-    )
-} 
-                else {  
+                    println("ANICHIN V2 REAL EMBED:")  
+                    println(fixedEmbedUrl)  
+
+                    println("ANICHIN V2 CALLING EXTRACTOR:")  
+                    println(fixedEmbedUrl)  
+
+                    loadExtractor(  
+                        fixedEmbedUrl,  
+                        fixedPlayerUrl,  
+                        subtitleCallback,  
+                        callback  
+                    )  
+
+                    println("ANICHIN V2 EXTRACTOR FINISHED:")  
+                    println(fixedEmbedUrl)  
+
+                } else {  
 
                     /*  
                      * No second iframe.  
