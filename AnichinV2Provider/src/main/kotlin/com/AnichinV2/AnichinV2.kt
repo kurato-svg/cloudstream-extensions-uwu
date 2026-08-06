@@ -115,26 +115,9 @@ override suspend fun load(
         ?.trim()  
         .toString()  
 
-    var poster = document
-    .selectFirst("div.ime img")
-    ?.attr("src")
-    .orEmpty()
-
-if (poster.isBlank()) {
-    poster = document
-        .selectFirst("div.ime img")
-        ?.attr("data-src")
-        .orEmpty()
-}
-
-if (poster.isBlank()) {
-    poster = document
-        .selectFirst("meta[property='og:image']")
-        ?.attr("content")
-        .orEmpty()
-}
-
-poster = fixUrl(poster)  
+    var poster = document  
+        .select("div.ime > img")  
+        .attr("src")  
 
     val description = document  
         .selectFirst("div.entry-content")  
