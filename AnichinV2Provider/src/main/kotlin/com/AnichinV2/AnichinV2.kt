@@ -103,8 +103,8 @@ class AnichinV2 : MainAPI() {
             ).document
 
             val results = document
-                .select("div.listupd > article")
-                .map { it.toSearchResult() }
+    .select("div.listupd > article")
+    .mapNotNull { it.toSearchResult() }
 
             if (results.isEmpty()) break
 
