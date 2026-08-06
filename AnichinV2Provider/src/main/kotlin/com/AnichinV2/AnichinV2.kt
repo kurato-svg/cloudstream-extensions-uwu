@@ -276,16 +276,35 @@ override suspend fun loadLinks(
 
             val urls = mutableSetOf<String>()
 
-            streamDoc.select("iframe[src]").forEach {
+streamDoc.select("iframe[src]").forEach {
 
-                val src = fixUrl(it.attr("src"))
+    val src = fixUrl(it.attr("src"))
 
-                if (src.isNotBlank())
-                    urls.add(src)
-            }
+    if (src.isNotBlank())
+        urls.add(src)
 
-            if (urls.isEmpty())
-                urls.add(streamUrl)
+    runCatching {
+
+        val nestedDoc = app.get(
+            src,
+            headers = mapOf(
+                "Referer" to streamUrl,
+                "User-Agent" to USER_AGENT
+            )
+        ).document
+
+        nestedDoc.select("iframe[src]").forEach { nested ->
+
+            val nestedSrc = fixUrl(
+                nested.attr("src")
+            )
+
+            if (nestedSrc.isNotBlank())
+                urls.add(nestedSrc)
+        }
+
+    }
+}
 
             urls.forEach { url ->
 
