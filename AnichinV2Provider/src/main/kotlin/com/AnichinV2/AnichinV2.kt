@@ -3,28 +3,75 @@ package com.AnichinV2
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
 class AnichinV2 : MainAPI() {
 
-override var mainUrl = "https://anichin.moe"  
-override var name = "Anichin V2"  
-override val hasMainPage = true  
-override var lang = "id"  
-override val hasDownloadSupport = true  
+    companion object {
 
-override val supportedTypes = setOf(  
-    TvType.Movie,  
-    TvType.Anime  
-)  
+        private val REQUEST_HEADERS = mapOf(
+            "Origin" to "https://anichin.moe",
+            "User-Agent" to USER_AGENT
+        )
+    }
 
-override val mainPage = mainPageOf(  
-    "anime/?order=update" to "Latest Update",  
-    "anime/?status=ongoing&order=update" to "Series Ongoing",  
-    "anime/?status=completed&order=update" to "Series Completed",  
-    "anime/?status=hiatus&order=update" to "Series Drop/Hiatus",  
-    "anime/?type=movie&order=update" to "Movie"  
-)  
+    override var mainUrl = "https://anichin.moe"
+    override var name = "Anichin V2"
+    override val hasMainPage = true
+    override var lang = "id"
+    override val hasDownloadSupport = true  
+
+override val supportedTypes = setOf(
+    TvType.Movie,
+    TvType.Anime
+)
+
+override val mainPage = mainPageOf(
+    "anime/?order=update" to "Latest Update",
+    "anime/?status=ongoing&order=update" to "Series Ongoing",
+    "anime/?status=completed&order=update" to "Series Completed",
+    "anime/?status=hiatus&order=update" to "Series Drop/Hiatus",
+    "anime/?type=movie&order=update" to "Movie"
+)
+
+private fun decodePlayer(value: String): Document? {
+
+    if (value.isBlank()) return null
+
+    return runCatching {
+        Jsoup.parse(base64Decode(value))
+    }.getOrNull()
+}
+
+private fun extractIframes(document: Document): List<String> {
+
+    return document
+        .select("iframe[src]")
+        .mapNotNull {
+            it.attr("src")
+                .trim()
+                .takeIf(String::isNotBlank)
+        }
+        .distinct()
+}
+
+private suspend fun getDocument(
+    url: String,
+    referer: String
+): Document? {
+
+    return runCatching {
+
+        app.get(
+            fixUrl(url),
+            headers = REQUEST_HEADERS + mapOf(
+                "Referer" to referer
+            )
+        ).document
+
+    }.getOrNull()
+}
 
 override suspend fun getMainPage(  
     page: Int,  
