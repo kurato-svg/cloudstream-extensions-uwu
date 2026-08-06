@@ -307,19 +307,20 @@ streamDoc.select("iframe[src]").forEach {
 }
 
             urls
+    .filter { it.isNotBlank() }
     .distinct()
     .forEach { url ->
 
-                if (loadedUrls.add(url)) {
+        if (!loadedUrls.add(url))
+            return@forEach
 
-                    loadExtractor(
-                        url,
-                        streamUrl,
-                        subtitleCallback,
-                        callback
-                    )
-                }
-            }
+        loadExtractor(
+            url,
+            streamUrl,
+            subtitleCallback,
+            callback
+        )
+    }
 
         }
     }
