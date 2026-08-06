@@ -61,9 +61,24 @@ class AnichinV2 : MainAPI() {
                 .attr("href")
         )
 
-        val posterUrl = fixUrlNull(
-            this.select("div.bsx > a img")
-                .attr("src")
+        var poster = document
+    .selectFirst("div.ime img")
+    ?.attr("src")
+    .orEmpty()
+
+if (poster.isBlank()) {
+    poster = document
+        .selectFirst("div.ime img")
+        ?.attr("data-src")
+        .orEmpty()
+}
+
+if (poster.isBlank()) {
+    poster = document
+        .selectFirst("meta[property=og:image]")
+        ?.attr("content")
+        .orEmpty()
+}
         )
 
         return newAnimeSearchResponse(
