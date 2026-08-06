@@ -61,32 +61,31 @@ class AnichinV2 : MainAPI() {
                 .attr("href")
         )
 
-        var poster = document
-    .selectFirst("div.ime img")
-    ?.attr("src")
-    .orEmpty()
+        var poster = this
+            .selectFirst("div.ime img")
+            ?.attr("src")
+            .orEmpty()
 
-if (poster.isBlank()) {
-    poster = document
-        .selectFirst("div.ime img")
-        ?.attr("data-src")
-        .orEmpty()
-}
+        if (poster.isBlank()) {
+            poster = this
+                .selectFirst("div.ime img")
+                ?.attr("data-src")
+                .orEmpty()
+        }
 
-if (poster.isBlank()) {
-    poster = document
-        .selectFirst("meta[property=og:image]")
-        ?.attr("content")
-        .orEmpty()
-}
-        )
+        if (poster.isBlank()) {
+            poster = this
+                .selectFirst("meta[property=og:image]")
+                ?.attr("content")
+                .orEmpty()
+        }
 
         return newAnimeSearchResponse(
             title,
             href,
             TvType.Anime
         ) {
-            this.posterUrl = posterUrl
+            this.posterUrl = fixUrlNull(poster)
         }
     }
 
@@ -264,11 +263,11 @@ if (poster.isBlank()) {
         ).document
 
         document.select(".mobius option").forEach { server ->
-           
+
             println("========== ANICHIN SERVER ==========")
-println("SERVER: ${server.text().trim()}")
-println("VALUE: ${server.attr("value")}")
-println("====================================")
+            println("SERVER: ${server.text().trim()}")
+            println("VALUE: ${server.attr("value")}")
+            println("====================================")
 
             val serverName = server.text().trim()
             val base64 = server.attr("value")
@@ -327,30 +326,23 @@ println("====================================")
                 println("ANICHIN V2 PLAYER URL:")
                 println(fixedPlayerUrl)
 
-                /*
-                 * Try the player wrapper.
-                 *
-                 * Some servers return another iframe here,
-                 * for example OK.ru / Dailymotion.
-                 */
-                 // Try extractor directly first (Anichin X style)
-try {
-    println("ANICHIN V2 DIRECT EXTRACTOR:")
-    println(fixedPlayerUrl)
+                try {
+                    println("ANICHIN V2 DIRECT EXTRACTOR:")
+                    println(fixedPlayerUrl)
 
-    loadExtractor(
-        fixedPlayerUrl,
-        streamUrl,
-        subtitleCallback,
-        callback
-    )
+                    loadExtractor(
+                        fixedPlayerUrl,
+                        streamUrl,
+                        subtitleCallback,
+                        callback
+                    )
 
-    println("ANICHIN V2 DIRECT DONE:")
-    println(fixedPlayerUrl)
+                    println("ANICHIN V2 DIRECT DONE:")
+                    println(fixedPlayerUrl)
 
-} catch (e: Exception) {
-    println("ANICHIN V2 DIRECT ERROR: ${e.message}")
-}
+                } catch (e: Exception) {
+                    println("ANICHIN V2 DIRECT ERROR: ${e.message}")
+                }
 
                 try {
 
@@ -390,13 +382,6 @@ try {
 
                     } else {
 
-                        /*
-                         * No second iframe.
-                         *
-                         * Some servers may already provide
-                         * an extractor-compatible player URL.
-                         */
-
                         println("ANICHIN V2 NO SECOND IFRAME")
                         println("ANICHIN V2 TRY ORIGINAL PLAYER")
 
@@ -409,11 +394,6 @@ try {
                     }
 
                 } catch (e: Exception) {
-
-                    /*
-                     * If opening the player wrapper fails,
-                     * still try the original player URL.
-                     */
 
                     println(
                         "ANICHIN V2 PLAYER ERROR [$serverName]: ${e.message}"
