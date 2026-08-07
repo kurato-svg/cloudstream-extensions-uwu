@@ -1,5 +1,6 @@
 package com.oppadrama
 
+import android.util.Log
 import com.lagradost.cloudstream3.app
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
@@ -10,6 +11,7 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 object AbyssDiagnostic {
+    private const val TAG = "OppaDrama"
 
     suspend fun inspect(
         url: String,
@@ -25,11 +27,15 @@ object AbyssDiagnostic {
             )
         ).text
 
-        val datas = Regex("""const\s+datas\s*=\s*["']([^"']+)["']""")
+        val datas = Regex("""(?:const|var|let)\s+datas\s*=\s*["']([^"']+)["']""")
             .find(page)
             ?.groupValues
             ?.getOrNull(1)
-            ?: return listOf("OPPA_ABYSS: datas not found for $url")
+            ?: return listOf(
+                "OPPA_ABYSS: datas not found",
+                "OPPA_ABYSS_URL: $url",
+                "OPPA_ABYSS_PAGE: ${page.take(500)}"
+            )
 
         val decoded = String(
             Base64.getDecoder().decode(datas),
@@ -54,7 +60,7 @@ object AbyssDiagnostic {
         val ivBytes = keyBytes.copyOfRange(0, 16)
 
         val decrypted = aesCtr(
-            media.toByteArray(StandardCharsets.ISO_8859_1),
+            media.latin1Bytes(),
             keyBytes,
             ivBytes
         )
@@ -74,7 +80,7 @@ object AbyssDiagnostic {
 
         logs.add("OPPA_ABYSS: OK")
         logs.add("OPPA_ABYSS: slug=$slug md5_id=$md5Id user_id=$userId")
-        logs.add("OPPA_ABYSS: raw=$decryptedJson")
+        logs.add("OPPA_ABYSS_RAW: $decryptedJson")
 
         val sources = mp4.optJSONArray("sources")
         val domains = mp4.optJSONArray("domains")
@@ -96,6 +102,12 @@ object AbyssDiagnostic {
         }
 
         return logs
+    }
+
+    private fun String.latin1Bytes(): ByteArray {
+        return ByteArray(length) { index ->
+            this[index].code.toByte()
+        }
     }
 
     private fun md5Hex(value: String): String {

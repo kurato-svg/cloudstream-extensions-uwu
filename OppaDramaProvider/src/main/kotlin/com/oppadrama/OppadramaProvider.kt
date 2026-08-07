@@ -1,7 +1,9 @@
 package com.oppadrama
 
+import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URI
@@ -166,10 +168,18 @@ class OppadramaProvider : MainAPI() {
                     ?.also { rawLinks.add(it) }
             }
 
+        rawLinks.forEach {
+            Log.i(TAG, "OPPA_RAW = $it")
+        }
+
         val sortedLinks = rawLinks
             .filter { it.isNotBlank() }
             .distinct()
             .sortedBy { it.priorityScore() }
+
+        sortedLinks.forEach {
+            Log.i(TAG, "OPPA_SORTED = $it")
+        }
 
         sortedLinks.forEach { link ->
             if (
@@ -178,7 +188,9 @@ class OppadramaProvider : MainAPI() {
             ) {
                 runCatching {
                     AbyssDiagnostic.inspect(link, data)
-                        .forEach { println(it) }
+                        .forEach { line -> Log.i(TAG, line) }
+                }.onFailure {
+                    Log.e(TAG, "OPPA_ABYSS_ERROR = ${it.message}", it)
                 }
             }
 
@@ -189,6 +201,8 @@ class OppadramaProvider : MainAPI() {
                     subtitleCallback,
                     callback
                 )
+            }.onFailure {
+                Log.e(TAG, "OPPA_EXTRACTOR_FAILED = $link | ${it.message}")
             }
         }
 
@@ -360,6 +374,7 @@ class OppadramaProvider : MainAPI() {
         referer: String
     ): List<String> {
         val cleaned = value.trim()
+        val cleanLabel = label.trim()
 
         if (cleaned.isBlank()) {
             return emptyList()
@@ -375,30 +390,39 @@ class OppadramaProvider : MainAPI() {
         }
 
         val decoded = decodeBase64(cleaned)
-            ?: return emptyList()
+            ?: run {
+                Log.e(TAG, "OPPA_DECODE_FAILED label=$cleanLabel")
+                return emptyList()
+            }
 
+        Log.i(TAG, "OPPA_DECODE_LABEL = $cleanLabel")
+        Log.i(TAG, "OPPA_DECODE_HTML = ${decoded.take(500)}")
+
+        val lowerLabel = cleanLabel.lowercase()
         val results = linkedSetOf<String>()
 
-        iframeSrcRegex.findAll(decoded)
-            .mapNotNull { it.groupValues.getOrNull(1) }
+        /*
+         * For this diagnostic version, skip mirrors that the website itself
+         * cannot play. This avoids WebViewResolver wasting 15 to 30 seconds
+         * on dead StreamSB/GDrive routes and lets us see Hydrax clearly.
+         */
+        if (
+            lowerLabel.contains("streamsb") ||
+            lowerLabel.contains("gdrive") ||
+            lowerLabel.contains("google")
+        ) {
+            Log.i(TAG, "OPPA_SKIP_MIRROR label=$cleanLabel")
+            return emptyList()
+        }
+
+        Jsoup.parse(decoded)
+            .select("iframe")
+            .mapNotNull { it.getIframeUrl() }
             .mapNotNull { it.toAbsoluteUrl(referer) }
             .forEach { results.add(it) }
 
-        val streamSbId = shortcodeId(decoded, "StreamSB")
-            ?: shortcodeId(decoded, "StreamSB2")
-            ?: if (label.contains("streamsb", true)) {
-                anyShortcodeId(decoded)
-            } else {
-                null
-            }
-
-        if (!streamSbId.isNullOrBlank()) {
-            streamSbCandidates(streamSbId)
-                .forEach { results.add(it) }
-        }
-
         val hydraxId = shortcodeId(decoded, "Hydrax")
-            ?: if (label.contains("hydrax", true)) {
+            ?: if (lowerLabel.contains("hydrax")) {
                 anyShortcodeId(decoded)
             } else {
                 null
@@ -409,35 +433,26 @@ class OppadramaProvider : MainAPI() {
                 .forEach { results.add(it) }
         }
 
-        val gdriveId = shortcodeId(decoded, "GDrive")
-            ?: if (label.contains("gdrive", true)) {
-                anyShortcodeId(decoded)
-            } else {
-                null
-            }
-
-        if (!gdriveId.isNullOrBlank()) {
-            results.add("https://drive.google.com/file/d/$gdriveId/view")
-        }
-
         Regex("""https?://[^\s'"<>]+""")
             .findAll(decoded)
             .map { it.value }
             .mapNotNull { it.toAbsoluteUrl(referer) }
             .forEach { results.add(it) }
 
+        results.forEach {
+            Log.i(TAG, "OPPA_MIRROR = $it")
+        }
+
         return results.toList()
     }
 
     private fun decodeBase64(text: String): String? {
         return runCatching {
-            val normalized = text
-                .replace("\\s".toRegex(), "")
-                .padEnd(
-                    text.replace("\\s".toRegex(), "").length +
-                        (4 - text.replace("\\s".toRegex(), "").length % 4) % 4,
-                    '='
-                )
+            val compact = text.replace("\\s".toRegex(), "")
+            val normalized = compact.padEnd(
+                compact.length + (4 - compact.length % 4) % 4,
+                '='
+            )
 
             String(
                 Base64.getDecoder().decode(normalized),
@@ -490,8 +505,6 @@ class OppadramaProvider : MainAPI() {
 
     private fun hydraxCandidates(id: String): List<String> {
         return listOf(
-            "https://abyss.to/?v=$id",
-            "https://abyss.to/v/$id",
             "https://abyssplayer.com/?v=$id"
         )
     }
@@ -651,9 +664,6 @@ class OppadramaProvider : MainAPI() {
     }
 
     companion object {
-        private val iframeSrcRegex = Regex(
-            """<iframe[^>]+src=['"]([^'"]+)['"]""",
-            RegexOption.IGNORE_CASE
-        )
+        private const val TAG = "OppaDrama"
     }
 }
