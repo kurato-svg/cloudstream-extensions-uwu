@@ -40,35 +40,44 @@ class OppadramaProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(
-        page: Int,
-        request: MainPageRequest
-    ): HomePageResponse {
-        val url = when {
-            request.data.isBlank() -> {
-                if (page == 1) mainUrl else "$mainUrl/page/$page/"
-            }
+    page: Int,
+    request: MainPageRequest
+): HomePageResponse {
 
-            else -> {
-                val separator = if (request.data.contains("?")) "&" else "?"
-                "$mainUrl/${request.data}${separator}page=$page"
-            }
+    val url = when {
+
+        request.data.isBlank() -> {
+            if (page == 1)
+                mainUrl
+            else
+                "$mainUrl/page/$page/"
         }
 
-        val document = app.get(
-            url,
-            headers = headers
-        ).document
+        else -> {
+            val separator =
+                if (request.data.contains("?")) "&" else "?"
 
-        val items = document
-            .select("div.listupd article.bs, div.listupd article.stylefor")
-            .mapNotNull { it.toSearchResult() }
+            "$mainUrl/${request.data}${separator}page=$page"
+        }
+    }
 
-        val hasNext = document.selectFirst("div.hpage a.r") != null
+    val response = app.get(
+        url,
+        headers = headers
+    )
 
-        return newHomePageResponse(
-            HomePageList(request.name, items),
-            hasNext
-        )
+    throw ErrorLoadingException(
+        """
+HTTP: ${response.code}
+URL: ${response.url}
+TITLE: ${response.document.title()}
+ARTICLE: ${response.document.select("article.bs").size}
+LISTUPD: ${response.document.select(".listupd").size}
+
+BODY:
+${response.text.take(1000)}
+        """.trimIndent()
+    )
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
