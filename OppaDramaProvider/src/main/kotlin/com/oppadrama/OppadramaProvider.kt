@@ -172,6 +172,16 @@ class OppadramaProvider : MainAPI() {
             .sortedBy { it.priorityScore() }
 
         sortedLinks.forEach { link ->
+            if (
+                link.contains("abyss", true) ||
+                link.contains("hydrax", true)
+            ) {
+                runCatching {
+                    AbyssDiagnostic.inspect(link, data)
+                        .forEach { println(it) }
+                }
+            }
+
             runCatching {
                 loadExtractor(
                     link,
