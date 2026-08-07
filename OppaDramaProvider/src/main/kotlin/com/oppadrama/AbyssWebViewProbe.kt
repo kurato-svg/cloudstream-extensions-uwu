@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.view.MotionEvent
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
@@ -23,7 +24,7 @@ import kotlin.coroutines.resume
 
 object AbyssWebViewProbe {
 
-    private const val MAX_WAIT_MS = 12000L
+    private const val MAX_WAIT_MS = 26000L
 
     data class AbyssStream(
         val label: String,
@@ -57,6 +58,7 @@ object AbyssWebViewProbe {
                 handler.post {
                     if (continuation.isActive) {
                         val result = streams.values.toList()
+                        Log.i(TAG, "OPPA_FAST_FINISH = streams=${result.size}")
                         safeDestroy()
                         continuation.resume(result)
                     }
@@ -95,6 +97,12 @@ object AbyssWebViewProbe {
                 if (cookie.isNotBlank()) {
                     headers["Cookie"] = cookie
                 }
+
+                Log.i(
+                    TAG,
+                    "OPPA_FAST_CAPTURE_STREAM = $fixedUrl | " +
+                        headers.keys.joinToString(",")
+                )
 
                 streams[fixedUrl] = AbyssStream(
                     label = guessLabel(fixedUrl),
@@ -147,6 +155,10 @@ object AbyssWebViewProbe {
                         request: WebResourceRequest?
                     ): WebResourceResponse? {
                         val requestUrl = request?.url?.toString()
+
+                        if (isUsefulDebugUrl(requestUrl)) {
+                            Log.i(TAG, "OPPA_FAST_WEBVIEW_REQUEST = $requestUrl")
+                        }
 
                         if (
                             requestUrl?.contains("abyssplayer.com/?v=", true) == true
@@ -226,9 +238,22 @@ object AbyssWebViewProbe {
                     null
                 )
 
-                handler.postDelayed({ clickWebView() }, 1800L)
-                handler.postDelayed({ clickWebView() }, 3600L)
-                handler.postDelayed({ clickWebView() }, 5400L)
+                listOf(
+                    1800L,
+                    3200L,
+                    5000L,
+                    7200L,
+                    9500L,
+                    12500L,
+                    15500L,
+                    18500L,
+                    21500L
+                ).forEach { delay ->
+                    handler.postDelayed({
+                        Log.i(TAG, "OPPA_FAST_CLICK = $delay")
+                        clickWebView()
+                    }, delay)
+                }
 
                 handler.postDelayed({
                     finish()
@@ -330,6 +355,20 @@ object AbyssWebViewProbe {
             .replace("<", "&lt;")
             .replace(">", "&gt;")
     }
+
+    private fun isUsefulDebugUrl(requestUrl: String?): Boolean {
+        val value = requestUrl?.lowercase().orEmpty()
+
+        return value.contains("abyss") ||
+            value.contains("iamcdn") ||
+            value.contains("jwplayer") ||
+            value.contains("sssrr") ||
+            value.contains("/sora/") ||
+            value.contains(".m3u8") ||
+            value.contains(".mp4")
+    }
+
+    private const val TAG = "OppaDrama"
 
     private const val USER_AGENT =
         "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 Chrome/139.0 Mobile Safari/537.36"

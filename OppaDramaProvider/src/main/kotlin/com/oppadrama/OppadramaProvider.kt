@@ -281,6 +281,8 @@ class OppadramaProvider : MainAPI() {
                 if (streams.isNotEmpty()) {
                     continue
                 }
+
+                Log.i(TAG, "OPPA_FAST_HYDRAX_EMPTY = ${mirror.url}")
             }
 
             runCatching {
