@@ -94,42 +94,61 @@ private val headers = mapOf(
 
     
 
-    private fun Element.toSearchResult(typeHint: TvType? = null): SearchResponse? {
-        val anchor = selectFirst("a[href]") ?: return null
-        val href = anchor.attr("href").trim()
-        if (href.isBlank()) return null
+    private fun Element.toSearchResult(): SearchResponse? {
 
-        val url = fixUrl(href)
-        val title = anchor.attr("title")
-            .ifBlank { selectFirst(".tt")?.text().orEmpty() }
-            .ifBlank { anchor.text() }
-            .trim()
+    val a = selectFirst("a") ?: return null
 
-        if (title.isBlank()) return null
+    val title =
 
-        val poster = selectFirst("img")
-            ?.getImageUrl()
-            ?.let(::fixUrlNull)
+        a.attr("title")
+            .ifBlank {
+                selectFirst(".tt")?.ownText()
+            }
+            ?.trim()
+            ?: return null
 
-        val badgeText = selectFirst(".typez, .status, .epx")
-            ?.text()
-            .orEmpty()
+    val href =
+        fixUrl(a.attr("href"))
 
-        val type = typeHint ?: when {
-            url.contains("/movie/", true) -> TvType.Movie
-            badgeText.contains("movie", true) -> TvType.Movie
-            else -> TvType.TvSeries
+    val poster =
+
+        selectFirst("img")
+            ?.attr("src")
+            ?.let(::fixUrl)
+
+    val type =
+
+        when {
+
+            href.contains("/movie-", true) ->
+                TvType.Movie
+
+            else ->
+                TvType.AsianDrama
         }
 
-        return if (type == TvType.Movie) {
-            newMovieSearchResponse(title, url, TvType.Movie) {
-                posterUrl = poster
-            }
-        } else {
-            newTvSeriesSearchResponse(title, url, TvType.TvSeries) {
-                posterUrl = poster
-            }
+    return if (type == TvType.Movie) {
+
+        newMovieSearchResponse(
+            title,
+            href,
+            TvType.Movie
+        ) {
+
+            posterUrl = poster
         }
+
+    } else {
+
+        newAnimeSearchResponse(
+            title,
+            href,
+            TvType.AsianDrama
+        ) {
+
+            posterUrl = poster
+        }
+    }
     }
 
     override suspend fun search(
