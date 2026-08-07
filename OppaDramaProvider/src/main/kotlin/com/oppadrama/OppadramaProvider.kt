@@ -201,20 +201,20 @@ class OppadramaProvider : MainAPI() {
                     Log.i(TAG, "OPPA_ABYSS_LINK = ${stream.label} | $fixedUrl")
 
                     callback(
-                        ExtractorLink(
+                        newExtractorLink(
                             source = "Abyss",
                             name = "Abyss ${stream.label}",
-                            url = fixedUrl,
-                            referer = link,
-                            quality = getQualityFromName(stream.label),
-                            isM3u8 = fixedUrl.contains(".m3u8", true),
-                            headers = mapOf(
+                            url = fixedUrl
+                        ) {
+                            this.referer = link
+                            this.quality = getQualityFromName(stream.label)
+                            this.headers = mapOf(
                                 "Referer" to link,
                                 "Origin" to "https://abyssplayer.com",
                                 "User-Agent" to USER_AGENT,
                                 "Accept" to "*/*"
                             )
-                        )
+                        }
                     )
                 }
 
