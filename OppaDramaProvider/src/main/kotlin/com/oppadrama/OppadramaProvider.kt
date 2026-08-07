@@ -51,16 +51,6 @@ private val headers = mapOf(
 
     "series/?country[]=thailand&type=Drama&order=update" to "Thailand"
 )
-
-    private fun buildUrl(path: String): String = when {
-        path.startsWith("http://", true) ||
-            path.startsWith("https://", true) -> path
-
-        path.startsWith("/") -> "${mainUrl.trimEnd('/')}$path"
-
-        else -> "${mainUrl.trimEnd('/')}/$path"
-    }
-
     
 
     private fun Element.toSearchResult(): SearchResponse? {
@@ -109,11 +99,12 @@ private val headers = mapOf(
 
     } else {
 
-        newAnimeSearchResponse(
-            title,
-            href,
-            TvType.AsianDrama
-        ) {
+        newTvSeriesSearchResponse(
+    title,
+    href,
+    TvType.AsianDrama
+)
+        {
 
             posterUrl = poster
         }
@@ -251,7 +242,6 @@ private val headers = mapOf(
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        resolveDomain()
 
         val document = app.get(
             data,
