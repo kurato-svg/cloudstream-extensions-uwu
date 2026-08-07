@@ -31,7 +31,8 @@ private val supportedVideoHosts = setOf(
 "odnoklassniki",    
 "rumble.com",    
 "vidguard",    
-"streamruby",    
+"streamruby",
+"rumble",
 "dood",    
 "dailymotion"
 
