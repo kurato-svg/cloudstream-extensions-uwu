@@ -29,10 +29,6 @@ class OppadramaProvider : MainAPI() {
         "Origin" to mainUrl
     )
 
-    private val webViewResolver = WebViewResolver(
-        Regex("""45\.11\.57\.192|oppa\.biz""")
-    )
-
     override val mainPage = mainPageOf(
         "" to "Latest Update",
         "series/?status=&type=Drama&order=update" to "Drama",
@@ -47,16 +43,27 @@ class OppadramaProvider : MainAPI() {
         page: Int,
         request: MainPageRequest
     ): HomePageResponse {
-        val url = buildMainPageUrl(request.data, page)
+        val url = when {
+            request.data.isBlank() -> {
+                if (page == 1) mainUrl else "$mainUrl/page/$page/"
+            }
 
-        val document = getPage(url)
+            else -> {
+                val separator = if (request.data.contains("?")) "&" else "?"
+                "$mainUrl/${request.data}${separator}page=$page"
+            }
+        }
+
+        val document = app.get(
+            url,
+            headers = headers
+        ).document
 
         val items = document
-            .selectCards()
+            .select("div.listupd article.bs, div.listupd article.stylefor")
             .mapNotNull { it.toSearchResult() }
-            .distinctBy { it.url }
 
-        val hasNext = document.selectFirst("div.hpage a.r, .pagination a.next, a.next") != null
+        val hasNext = document.selectFirst("div.hpage a.r") != null
 
         return newHomePageResponse(
             HomePageList(request.name, items),
@@ -67,12 +74,14 @@ class OppadramaProvider : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         val encoded = URLEncoder.encode(query, Charsets.UTF_8.name())
 
-        val document = getPage("$mainUrl/?s=$encoded")
+        val document = app.get(
+            "$mainUrl/?s=$encoded",
+            headers = headers
+        ).document
 
         return document
-            .selectCards()
+            .select("div.listupd article.bs, div.listupd article.stylefor")
             .mapNotNull { it.toSearchResult() }
-            .distinctBy { it.url }
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
@@ -118,7 +127,10 @@ class OppadramaProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val firstDocument = getPage(url)
+        val firstDocument = app.get(
+            url,
+            headers = headers
+        ).document
 
         val isEpisodePage = url.contains("-episode-", true)
         val isMovie = url.contains("/movie-", true)
@@ -130,7 +142,7 @@ class OppadramaProvider : MainAPI() {
         }
 
         val document = if (!seriesUrl.isNullOrBlank()) {
-            getPage(seriesUrl)
+            app.get(seriesUrl, headers = headers).document
         } else {
             firstDocument
         }
@@ -207,11 +219,15 @@ class OppadramaProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val document = getPage(data, referer = mainUrl)
+        val document = app.get(
+            data,
+            headers = headers,
+            referer = mainUrl
+        ).document
 
         val links = linkedSetOf<String>()
 
-        document.select("div.player-embed iframe, .player-embed iframe")
+        document.select("div.player-embed iframe")
             .forEach { iframe ->
                 iframe.getIframeUrl()
                     ?.toAbsoluteUrl(data)
@@ -227,7 +243,7 @@ class OppadramaProvider : MainAPI() {
                 )?.also { links.add(it) }
             }
 
-        document.select("div.dlbox a[href], .dlbox a[href]")
+        document.select("div.dlbox a[href]")
             .forEach { anchor ->
                 anchor.attr("href")
                     .trim()
@@ -249,48 +265,6 @@ class OppadramaProvider : MainAPI() {
         }
 
         return links.isNotEmpty()
-    }
-
-    private suspend fun getPage(
-        url: String,
-        referer: String = mainUrl
-    ): Document {
-        return app.get(
-            url,
-            headers = headers,
-            referer = referer,
-            interceptor = webViewResolver
-        ).document
-    }
-
-    private fun buildMainPageUrl(data: String, page: Int): String {
-        if (data.isBlank()) {
-            return if (page == 1) {
-                mainUrl
-            } else {
-                "$mainUrl/page/$page/"
-            }
-        }
-
-        val cleanData = data.trimStart('/')
-
-        if (page == 1) {
-            return "$mainUrl/$cleanData"
-        }
-
-        val separator = if (cleanData.contains("?")) "&" else "?"
-        return "$mainUrl/$cleanData${separator}paged=$page"
-    }
-
-    private fun Document.selectCards(): List<Element> {
-        val primary = select(
-            "div.listupd article.bs, div.listupd article.stylefor, " +
-                ".listupd article.bs, .listupd article.stylefor"
-        )
-
-        if (primary.isNotEmpty()) return primary
-
-        return select("div.listupd div.bsx, .listupd .bsx")
     }
 
     private fun decodeMirror(value: String, referer: String): String? {
@@ -328,7 +302,7 @@ class OppadramaProvider : MainAPI() {
     }
 
     private fun Document.episodes(): List<Episode> {
-        return select("div.eplister li a[href], .eplister li a[href]")
+        return select("div.eplister li a[href]")
             .reversed()
             .mapIndexed { index, element ->
                 val epNum = element
