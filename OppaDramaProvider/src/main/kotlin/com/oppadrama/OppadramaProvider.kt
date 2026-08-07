@@ -39,23 +39,32 @@ class OppadramaProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(
-        page: Int,
-        request: MainPageRequest
-    ): HomePageResponse {
-        val url = buildMainPageUrl(page, request.data)
-        val document = getSiteDocument(url)
+    page: Int,
+    request: MainPageRequest
+): HomePageResponse {
 
-        val items = document
-            .select("div.listupd article.bs, div.listupd article.stylefor")
-            .mapNotNull { it.toSearchResult() }
+    val url = ...
 
-        val hasNext = document.selectFirst("div.hpage a.r") != null
+    val response = app.get(
+        url,
+        headers = headers
+    )
 
-        return newHomePageResponse(
-            HomePageList(request.name, items),
-            hasNext
-        )
-    }
+    throw ErrorLoadingException(
+        """
+HTTP=${response.code}
+
+SET-COOKIE=
+${response.headers["Set-Cookie"]}
+
+LOCATION=
+${response.headers["Location"]}
+
+BODY=
+${response.text.take(1200)}
+        """.trimIndent()
+    )
+}
 
     override suspend fun search(query: String): List<SearchResponse> {
         val encoded = URLEncoder.encode(query, Charsets.UTF_8.name())
