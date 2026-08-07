@@ -56,8 +56,13 @@ private val headers = mapOf(
 ): HomePageResponse {
 
     val url = if (request.data.isBlank()) {
+
+    if (page == 1)
+        mainUrl
+    else
         "$mainUrl/page/$page/"
-    } else {
+
+} else { {
         val sep = if (request.data.contains("?")) "&" else "?"
         "$mainUrl/${request.data}$sep$page=$page"
     }
@@ -68,7 +73,7 @@ private val headers = mapOf(
     ).document
 
     val items = document
-        .select("div.listupd article.bs")
+        .select("div.listupd > div.excstf > article.bs")
         .mapNotNull {
             it.toSearchResult()
         }
@@ -103,9 +108,16 @@ private val headers = mapOf(
 
     val poster =
 
-        selectFirst("img")
-            ?.attr("src")
-            ?.let(::fixUrl)
+    selectFirst("img")
+        ?.let {
+
+            it.attr("data-src")
+                .ifBlank {
+                    it.attr("src")
+                }
+
+        }
+        ?.let(::fixUrl)
 
     val type =
 
@@ -134,7 +146,7 @@ private val headers = mapOf(
         newTvSeriesSearchResponse(
     title,
     href,
-    TvType.TvSeries
+    TvType.AsianDrama
 )
         {
 
@@ -156,7 +168,7 @@ private val headers = mapOf(
     ).document
 
     return document
-        .select("div.listupd article.bs")
+        .select("div.listupd > div.excstf > article.bs")
         .mapNotNull {
 
             it.toSearchResult()
@@ -236,7 +248,7 @@ private val headers = mapOf(
 
     val recommendations =
         document
-            .select(".listupd article.bs")
+            .select("div.listupd > div.excstf > article.bs")
             .mapNotNull {
                 it.toSearchResult()
             }
@@ -245,7 +257,7 @@ private val headers = mapOf(
         newTvSeriesLoadResponse(
     title,
     url,
-    TvType.TvSeries,
+    TvType.AsianDrama,
             {
 
         posterUrl = poster
