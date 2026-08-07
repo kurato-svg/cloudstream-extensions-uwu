@@ -206,33 +206,54 @@ class OppadramaProvider : MainAPI() {
                             " | cookie=${if (stream.headers.containsKey("Cookie")) "yes" else "no"}"
                     )
 
-                    callback(
-                        newExtractorLink(
-                            source = "Abyss",
-                            name = "Abyss ${stream.label}",
-                            url = fixedUrl
-                        ) {
-                            this.referer = link
-                            this.quality = getQualityFromName(stream.label)
-                            this.headers = stream.headers
-                                .toMutableMap()
-                                .apply {
-                                    remove("Host")
-                                    remove("host")
-                                    remove("Connection")
-                                    remove("connection")
-                                    remove("Accept-Encoding")
-                                    remove("accept-encoding")
-                                    remove("Range")
-                                    remove("range")
-
-                                    put("Referer", link)
-                                    put("Origin", "https://abyssplayer.com")
-                                    put("User-Agent", USER_AGENT)
-                                    put("Accept", get("Accept") ?: "*/*")
-                                }
+                    val webHeaders = stream.headers
+                        .toMutableMap()
+                        .cleanAbyssHeaders()
+                        .apply {
+                            put("Referer", link)
+                            put("User-Agent", USER_AGENT)
+                            put("Accept", get("Accept") ?: "*/*")
                         }
+
+                    val minimalHeaders = mapOf(
+                        "Referer" to link,
+                        "User-Agent" to USER_AGENT,
+                        "Accept" to "*/*"
                     )
+
+                    val videoFetchHeaders = webHeaders
+                        .toMutableMap()
+                        .apply {
+                            put("Sec-Fetch-Dest", "video")
+                            put("Sec-Fetch-Mode", "no-cors")
+                            put("Sec-Fetch-Site", "cross-site")
+                        }
+
+                    val variants = listOf(
+                        "Web" to webHeaders,
+                        "Minimal" to minimalHeaders,
+                        "Fetch" to videoFetchHeaders
+                    )
+
+                    variants.forEach { variant ->
+                        Log.i(
+                            TAG,
+                            "OPPA_ABYSS_VARIANT = ${stream.label} ${variant.first} | " +
+                                variant.second.keys.joinToString(",")
+                        )
+
+                        callback(
+                            newExtractorLink(
+                                source = "Abyss",
+                                name = "Abyss ${stream.label} ${variant.first}",
+                                url = fixedUrl
+                            ) {
+                                this.referer = link
+                                this.quality = getQualityFromName(stream.label)
+                                this.headers = variant.second
+                            }
+                        )
+                    }
                 }
 
                 if (streams.isNotEmpty()) {
@@ -555,6 +576,25 @@ class OppadramaProvider : MainAPI() {
         )
     }
 
+
+
+    private fun MutableMap<String, String>.cleanAbyssHeaders(): MutableMap<String, String> {
+        val blocked = setOf(
+            "host",
+            "connection",
+            "accept-encoding",
+            "range",
+            "origin"
+        )
+
+        keys.toList().forEach { key ->
+            if (key.lowercase() in blocked) {
+                remove(key)
+            }
+        }
+
+        return this
+    }
 
     private fun String.toAbsoluteStreamUrl(): String {
         val value = trim()
