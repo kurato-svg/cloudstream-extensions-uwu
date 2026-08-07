@@ -52,37 +52,6 @@ private val headers = mapOf(
     "series/?country[]=thailand&type=Drama&order=update" to "Thailand"
 )
 
-    private suspend fun resolveDomain() {
-        if (domainResolved) return
-        domainResolved = true
-
-        val redirect = runCatching {
-            val response = app.get(
-                mainUrl,
-                headers = headers,
-                allowRedirects = false
-            )
-            response.headers["location"] ?: response.headers["Location"]
-        }.getOrNull()?.trim()
-
-        if (redirect.isNullOrBlank()) return
-
-        val resolved = runCatching {
-            when {
-                redirect.startsWith("http://", true) ||
-                    redirect.startsWith("https://", true) -> redirect
-
-                redirect.startsWith("//") -> "https:$redirect"
-
-                else -> URI(mainUrl).resolve(redirect).toString()
-            }
-        }.getOrNull()
-
-        if (!resolved.isNullOrBlank()) {
-            mainUrl = resolved.trimEnd('/')
-        }
-    }
-
     private fun buildUrl(path: String): String = when {
         path.startsWith("http://", true) ||
             path.startsWith("https://", true) -> path
@@ -276,46 +245,7 @@ private val headers = mapOf(
     }
 }
 
-        val isMovie = typeText.contains("movie", true) ||
-            url.contains("/movie/", true)
-
-        return if (isMovie) {
-            newMovieLoadResponse(
-                title,
-                url,
-                TvType.Movie,
-                episodes.firstOrNull()?.data ?: url
-            ) {
-                posterUrl = poster
-                this.year = year
-                plot = description
-                this.tags = tags
-                if (duration != null) this.duration = duration
-                if (rating != null) addScore(rating.toString(), 10)
-                addActors(actors)
-                addTrailer(trailer)
-            }
-        } else {
-            newTvSeriesLoadResponse(
-                title,
-                url,
-                TvType.TvSeries,
-                episodes
-            ) {
-                posterUrl = poster
-                this.year = year
-                plot = description
-                this.tags = tags
-                if (duration != null) this.duration = duration
-                if (status != null) showStatus = status
-                if (rating != null) addScore(rating.toString(), 10)
-                addActors(actors)
-                addTrailer(trailer)
-            }
-        }
-    }
-
-    override suspend fun loadLinks(
+  override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
