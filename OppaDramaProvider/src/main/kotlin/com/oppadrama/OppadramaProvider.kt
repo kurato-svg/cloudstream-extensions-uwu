@@ -39,44 +39,60 @@ class OppadramaProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(
-        page: Int,
-        request: MainPageRequest
-    ): HomePageResponse {
-        val url = buildMainPageUrl(page, request.data)
+    page: Int,
+    request: MainPageRequest
+): HomePageResponse {
 
-        val response = app.get(
-            url,
-            headers = headers,
-            referer = mainUrl
-        )
+    val rawUrl = buildMainPageUrl(page, request.data)
 
-        throw ErrorLoadingException(
-            """
-HTTP=${response.code}
+    val response1 = app.get(
+        rawUrl,
+        headers = headers,
+        allowRedirects = false
+    )
 
-URL=$url
+    val verifiedUrl = if (rawUrl.contains("?")) {
+        "$rawUrl&verify_human=1"
+    } else {
+        "$rawUrl?verify_human=1"
+    }
 
-FINAL=${response.url}
+    val response2 = app.get(
+        verifiedUrl,
+        headers = headers,
+        allowRedirects = false
+    )
 
-SET-COOKIE=
-${response.headers["Set-Cookie"] ?: response.headers["set-cookie"]}
+    throw ErrorLoadingException(
+        """
+RAW URL:
+$rawUrl
 
-LOCATION=
-${response.headers["Location"] ?: response.headers["location"]}
+RESPONSE 1:
+HTTP=${response1.code}
+URL=${response1.url}
+SET-COOKIE=${response1.headers["Set-Cookie"]}
+LOCATION=${response1.headers["Location"]}
+TITLE=${response1.document.title()}
+ARTICLE=${response1.document.select("article.bs").size}
+LISTUPD=${response1.document.select(".listupd").size}
 
-TITLE=
-${response.document.title()}
+VERIFIED URL:
+$verifiedUrl
 
-ARTICLE=
-${response.document.select("article.bs").size}
+RESPONSE 2:
+HTTP=${response2.code}
+URL=${response2.url}
+SET-COOKIE=${response2.headers["Set-Cookie"]}
+LOCATION=${response2.headers["Location"]}
+TITLE=${response2.document.title()}
+ARTICLE=${response2.document.select("article.bs").size}
+LISTUPD=${response2.document.select(".listupd").size}
 
-LISTUPD=
-${response.document.select(".listupd").size}
-
-BODY=
-${response.text.take(1200)}
-            """.trimIndent()
-        )
+BODY 2:
+${response2.text.take(1200)}
+        """.trimIndent()
+    )
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
