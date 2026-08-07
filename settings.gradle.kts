@@ -1,7 +1,7 @@
 rootProject.name = "CloudstreamPlugins"
 
 // Temporary: build only AnichinV2Provider
-include("AnichinV2Provider")
+//include("AnichinV2Provider")
 include("OppaDramaProvider")
 
 // Auto-discovery disabled temporarily
