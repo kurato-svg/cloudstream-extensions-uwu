@@ -14,43 +14,43 @@ import java.net.URLEncoder
 class OppadramaProvider : MainAPI() {
 
     override var mainUrl = "http://45.11.57.192"
-    override var name = "OppaDrama"
-    override var lang = "id"
 
-    override val hasMainPage = true
-    override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
+override var name = "OppaDrama"
 
-    private var domainResolved = false
+override var lang = "id"
 
-    private val headers = mapOf(
-        "User-Agent" to
-            "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-        "Accept" to
-            "text/html,application/xhtml+xml,application/xml;q=0.9," +
-            "image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language" to "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7"
-    )
+override val hasMainPage = true
+
+override val supportedTypes = setOf(
+    TvType.Movie,
+    TvType.AsianDrama
+)
+
+private val headers = mapOf(
+    "User-Agent" to
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/139.0 Safari/537.36",
+
+    "Referer" to "$mainUrl/",
+
+    "Origin" to mainUrl
+)
 
     override val mainPage = mainPageOf(
-        "series/?status=&type=&order=update" to "Latest Update",
-        "series/?country%5B%5D=china&type=Drama&order=update" to "Drama Chinese",
-        "series/?country%5B%5D=japan&type=Drama&order=update" to "Drama Jepang",
-        "series/?country%5B%5D=south-korea&status=&type=Drama&order=update" to "Drama Korea",
-        "series/?country%5B%5D=philippines&type=Drama&order=update" to "Drama Philippines",
-        "series/?country%5B%5D=taiwan&type=Drama&order=update" to "Drama Taiwan",
-        "series/?country%5B%5D=thailand&type=Drama&order=update" to "Drama Thailand",
-        "series/?country%5B%5D=usa&type=Drama&order=update" to "Drama Western",
-        "series/?country%5B%5D=china&status=&type=Movie&order=update" to "Chinese Movie",
-        "series/?country%5B%5D=hong-kong&status=&type=Movie&order=update" to "Hong Kong Movie",
-        "series/?country%5B%5D=india&status=&type=Movie&order=update" to "India Movie",
-        "series/?country%5B%5D=japan&type=Movie&order=update" to "Japan Movie",
-        "series/?country%5B%5D=south-korea&status=&type=Movie&order=update" to "Korean Movie",
-        "series/?country%5B%5D=philippines&status=&type=Movie&order=update" to "Philippines Movie",
-        "series/?country%5B%5D=taiwan&type=Movie&order=update" to "Taiwan Movie",
-        "series/?country%5B%5D=thailand&type=Movie&order=update" to "Thailand Movie",
-        "series/?country%5B%5D=united-states&status=&type=Movie&order=update" to "Western Movie"
-    )
+
+    "" to "Latest Update",
+
+    "series/?status=&type=Drama&order=update" to "Drama",
+
+    "series/?type=Movie&order=update" to "Movie",
+
+    "series/?country[]=south-korea&type=Drama&order=update" to "Korea",
+
+    "series/?country[]=china&type=Drama&order=update" to "China",
+
+    "series/?country[]=japan&type=Drama&order=update" to "Japan",
+
+    "series/?country[]=thailand&type=Drama&order=update" to "Thailand"
+)
 
     private suspend fun resolveDomain() {
         if (domainResolved) return
@@ -92,33 +92,7 @@ class OppadramaProvider : MainAPI() {
         else -> "${mainUrl.trimEnd('/')}/$path"
     }
 
-    override suspend fun getMainPage(
-        page: Int,
-        request: MainPageRequest
-    ): HomePageResponse {
-        resolveDomain()
-
-        val separator = if (request.data.contains("?")) "&" else "?"
-        val url = buildUrl(request.data) + "${separator}page=$page"
-
-        val document = app.get(url, headers = headers).document
-        val typeHint = if (
-            request.data.contains("type=Movie", ignoreCase = true)
-        ) {
-            TvType.Movie
-        } else {
-            TvType.TvSeries
-        }
-
-        val items = document
-            .select("div.listupd article.bs, .listupd .bs")
-            .mapNotNull { it.toSearchResult(typeHint) }
-
-        return newHomePageResponse(
-            HomePageList(request.name, items),
-            hasNext = items.isNotEmpty()
-        )
-    }
+    
 
     private fun Element.toSearchResult(typeHint: TvType? = null): SearchResponse? {
         val anchor = selectFirst("a[href]") ?: return null
@@ -158,20 +132,25 @@ class OppadramaProvider : MainAPI() {
         }
     }
 
-    override suspend fun search(query: String): List<SearchResponse> {
-        resolveDomain()
+    override suspend fun search(
+    query: String
+): List<SearchResponse> {
 
-        val encoded = URLEncoder.encode(query, Charsets.UTF_8.name())
-        val document = app.get(
-            "${mainUrl.trimEnd('/')}/?s=$encoded",
-            headers = headers
-        ).document
+    val document = app.get(
 
-        return document
-            .select("div.listupd article.bs, .listupd .bs")
-            .mapNotNull { it.toSearchResult() }
-    }
+        "$mainUrl/?s=${query.replace(" ", "+")}",
 
+        headers = headers
+
+    ).document
+
+    return document
+        .select("div.listupd article.bs")
+        .mapNotNull {
+
+            it.toSearchResult()
+        }
+}
     override suspend fun load(url: String): LoadResponse {
         resolveDomain()
 
