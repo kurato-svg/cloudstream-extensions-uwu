@@ -282,7 +282,7 @@ class OppadramaProvider : MainAPI() {
                 this.year = year
                 plot = description
                 this.tags = tags
-                recommendations = recommendations
+                addRecommendations(recommendations)
                 if (duration != null) this.duration = duration
                 if (rating != null) addScore(rating.toString(), 10)
                 addActors(actors)
@@ -299,7 +299,7 @@ class OppadramaProvider : MainAPI() {
                 this.year = year
                 plot = description
                 this.tags = tags
-                recommendations = recommendations
+                addRecommendations(recommendations)
                 if (duration != null) this.duration = duration
                 if (status != null) showStatus = status
                 if (rating != null) addScore(rating.toString(), 10)
