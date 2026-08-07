@@ -20,15 +20,28 @@ class OppadramaProvider : MainAPI() {
         TvType.TvSeries
     )
 
-    private val headers = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/139.0 Safari/537.36",
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language" to "id-ID,id;q=0.9,en-US;q=0.8",
-        "Referer" to "$mainUrl/",
-        "Origin" to mainUrl
-    )
-
+    private val updateUrl = "https://oppa.biz"
+    private var domainChecked = false
     private var humanCookie: String? = null
+
+    private fun siteHeaders(
+        referer: String = mainUrl,
+        cookie: String? = humanCookie
+    ): Map<String, String> {
+        val base = mutableMapOf(
+            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/139.0 Safari/537.36",
+            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language" to "id-ID,id;q=0.9,en-US;q=0.8",
+            "Referer" to referer,
+            "Origin" to mainUrl
+        )
+
+        if (!cookie.isNullOrBlank()) {
+            base["Cookie"] = cookie
+        }
+
+        return base
+    }
 
     override val mainPage = mainPageOf(
         "series/?status=&type=&order=update" to "Latest Update",
@@ -65,6 +78,8 @@ class OppadramaProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+        resolveMainUrl()
+
         val encoded = URLEncoder.encode(query, Charsets.UTF_8.name())
         val document = getSiteDocument("$mainUrl/?s=$encoded")
 
@@ -132,41 +147,36 @@ class OppadramaProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val document = getSiteDocument(data)
-
-        val mirrorLinks = linkedSetOf<String>()
         val links = linkedSetOf<String>()
 
         document.select("div.player-embed iframe")
             .forEach { iframe ->
                 iframe.getIframeUrl()
                     ?.toAbsoluteUrl(data)
-                    ?.also { mirrorLinks.add(it) }
+                    ?.also { links.add(it) }
             }
 
         document.select("select.mirror option[value]")
             .forEach { option ->
                 decodeMirror(option.attr("value"), data)
-                    ?.also { mirrorLinks.add(it) }
+                    ?.also { links.add(it) }
             }
-
-        mirrorLinks
-            .filter { it.isFastPlayableHost() }
-            .forEach { links.add(it) }
 
         document.select("div.dlbox a[href]")
             .forEach { anchor ->
                 anchor.attr("href")
                     .trim()
                     .takeIf { it.startsWith("http", true) }
-                    ?.takeIf { it.isFastPlayableHost() }
                     ?.also { links.add(it) }
             }
 
-        if (links.isEmpty()) {
-            mirrorLinks.forEach { links.add(it) }
-        }
+        val orderedLinks = links
+            .sortedWith(
+                compareBy<String> { it.hostPriority() }
+                    .thenBy { it }
+            )
 
-        links.forEach { link ->
+        orderedLinks.forEach { link ->
             runCatching {
                 loadExtractor(
                     link,
@@ -177,7 +187,98 @@ class OppadramaProvider : MainAPI() {
             }
         }
 
-        return links.isNotEmpty()
+        return orderedLinks.isNotEmpty()
+    }
+
+    private suspend fun resolveMainUrl() {
+        if (domainChecked) return
+        domainChecked = true
+
+        val response = runCatching {
+            app.get(
+                updateUrl,
+                headers = siteHeaders(updateUrl, null),
+                allowRedirects = false
+            )
+        }.getOrNull() ?: return
+
+        val redirect = response.headers["Location"]
+            ?: response.headers["location"]
+
+        val resolved = when {
+            !redirect.isNullOrBlank() -> redirect.toAbsoluteFrom(updateUrl)
+            else -> response.text.findCurrentSiteUrl()
+        }
+
+        if (!resolved.isNullOrBlank()) {
+            mainUrl = resolved.trimEnd('/')
+            humanCookie = null
+        }
+    }
+
+    private fun String.findCurrentSiteUrl(): String? {
+        val text = this
+
+        val ipUrl = Regex("""https?://(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?""")
+            .find(text)
+            ?.value
+
+        if (!ipUrl.isNullOrBlank()) {
+            return ipUrl
+        }
+
+        return Regex("""https?://[A-Za-z0-9.-]+""")
+            .findAll(text)
+            .map { it.value.trimEnd('/') }
+            .firstOrNull { candidate ->
+                !candidate.contains("telegram", true) &&
+                    !candidate.contains("t.me", true) &&
+                    !candidate.contains("google", true) &&
+                    !candidate.contains("gstatic", true) &&
+                    !candidate.contains("gravatar", true) &&
+                    !candidate.contains("yoast", true)
+            }
+    }
+
+    private suspend fun getSiteDocument(url: String): Document {
+        resolveMainUrl()
+        ensureHumanCookie()
+
+        return app.get(
+            url.replaceBaseIfNeeded(),
+            headers = siteHeaders(),
+            referer = mainUrl
+        ).document
+    }
+
+    private fun String.replaceBaseIfNeeded(): String {
+        val value = trim()
+
+        if (value.startsWith(updateUrl, true)) {
+            return mainUrl + value.removePrefix(updateUrl).removePrefix(updateUrl.trimEnd('/'))
+        }
+
+        return value
+    }
+
+    private suspend fun ensureHumanCookie() {
+        if (!humanCookie.isNullOrBlank()) return
+
+        val response = app.get(
+            "$mainUrl/?verify_human=1",
+            headers = siteHeaders(mainUrl, null),
+            referer = mainUrl,
+            allowRedirects = false
+        )
+
+        val setCookie = response.headers["Set-Cookie"]
+            ?: response.headers["set-cookie"]
+
+        humanCookie = setCookie
+            ?.substringBefore(";")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: "user_is_human=true"
     }
 
     private fun buildMainPageUrl(page: Int, data: String): String {
@@ -196,48 +297,6 @@ class OppadramaProvider : MainAPI() {
                 val separator = if (base.contains("?")) "&" else "?"
                 "${base}${separator}page=$page"
             }
-        }
-    }
-
-    private suspend fun getSiteDocument(url: String): Document {
-        ensureHumanCookie()
-
-        return app.get(
-            url,
-            headers = verifiedHeaders(),
-            referer = mainUrl
-        ).document
-    }
-
-    private suspend fun ensureHumanCookie() {
-        if (!humanCookie.isNullOrBlank()) return
-
-        val response = app.get(
-            "$mainUrl/?verify_human=1",
-            headers = headers,
-            referer = mainUrl,
-            allowRedirects = false
-        )
-
-        val setCookie = response.headers["Set-Cookie"]
-            ?: response.headers["set-cookie"]
-
-        humanCookie = setCookie
-            ?.substringBefore(";")
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
-            ?: "user_is_human=true"
-    }
-
-    private fun verifiedHeaders(): Map<String, String> {
-        val cookie = humanCookie
-
-        return if (cookie.isNullOrBlank()) {
-            headers
-        } else {
-            headers + mapOf(
-                "Cookie" to cookie
-            )
         }
     }
 
@@ -289,14 +348,6 @@ class OppadramaProvider : MainAPI() {
         }
     }
 
-    private fun String.isFastPlayableHost(): Boolean {
-        val url = lowercase()
-
-        return url.contains("emturbovid.com") ||
-            url.contains("vidhide") ||
-            url.contains("earnvid")
-    }
-
     private fun decodeMirror(value: String, referer: String): String? {
         val cleaned = value.trim()
         if (cleaned.isBlank()) return null
@@ -316,6 +367,23 @@ class OppadramaProvider : MainAPI() {
                 ?.getIframeUrl()
                 ?.toAbsoluteUrl(referer)
         }.getOrNull()
+    }
+
+    private fun String.hostPriority(): Int {
+        val url = lowercase()
+
+        return when {
+            url.contains("emturbovid.com") -> 0
+            url.contains("vidhide") -> 1
+            url.contains("earnvid") -> 2
+            url.contains("abyssplayer") -> 3
+            url.contains("hydrax") -> 3
+            url.contains("minochinos") -> 4
+            url.contains("filelions") -> 4
+            url.contains("buzzheavier") -> 5
+            url.contains("filekeeper") -> 6
+            else -> 10
+        }
     }
 
     private fun Element.getImageUrl(): String? {
@@ -340,6 +408,13 @@ class OppadramaProvider : MainAPI() {
     }
 
     private fun String.toAbsoluteUrl(referer: String): String? {
+        val value = trim()
+        if (value.isBlank()) return null
+
+        return value.toAbsoluteFrom(referer)
+    }
+
+    private fun String.toAbsoluteFrom(referer: String): String? {
         val value = trim()
         if (value.isBlank()) return null
 
