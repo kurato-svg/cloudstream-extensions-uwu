@@ -9,7 +9,6 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URI
-import java.net.URLEncoder
 
 class OppadramaProvider : MainAPI() {
 
@@ -353,40 +352,7 @@ private val headers = mapOf(
         return null
     }
 
-    private fun parseStatus(value: String?): ShowStatus? = when {
-        value.isNullOrBlank() -> null
-
-        value.contains("ongoing", true) ||
-            value.contains("berjalan", true) -> ShowStatus.Ongoing
-
-        value.contains("completed", true) ||
-            value.contains("complete", true) ||
-            value.contains("tamat", true) -> ShowStatus.Completed
-
-        else -> null
-    }
-
-    private fun parseYear(value: String?): Int? {
-        return value
-            ?.let { Regex("""(?:19|20)\d{2}""").find(it)?.value }
-            ?.toIntOrNull()
-    }
-
-    private fun parseDuration(value: String?): Int? {
-        if (value.isNullOrBlank()) return null
-
-        val hours = Regex(
-            """(\d+)\s*(?:hr|hour|hours|jam)""",
-            RegexOption.IGNORE_CASE
-        ).find(value)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
-
-        val minutes = Regex(
-            """(\d+)\s*(?:min|mins|minute|minutes|menit)""",
-            RegexOption.IGNORE_CASE
-        ).find(value)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
-
-        return (hours * 60 + minutes).takeIf { it > 0 }
-    }
+    
 
     private fun Element.getImageUrl(): String? {
         return when {
