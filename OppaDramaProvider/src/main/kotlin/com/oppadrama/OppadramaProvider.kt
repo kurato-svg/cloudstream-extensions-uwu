@@ -28,6 +28,8 @@ class OppadramaProvider : MainAPI() {
         "Origin" to mainUrl
     )
 
+    private var humanCookie: String? = null
+
     override val mainPage = mainPageOf(
         "series/?status=&type=&order=update" to "Latest Update",
         "series/?status=&type=Drama&order=update" to "Drama",
@@ -39,60 +41,27 @@ class OppadramaProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(
-    page: Int,
-    request: MainPageRequest
-): HomePageResponse {
+        page: Int,
+        request: MainPageRequest
+    ): HomePageResponse {
+        val document = getSiteDocument(
+            buildMainPageUrl(page, request.data)
+        )
 
-    val rawUrl = buildMainPageUrl(page, request.data)
+        val items = document
+            .select("div.listupd article.bs, div.listupd article.stylefor")
+            .mapNotNull { it.toSearchResult() }
 
-    val response1 = app.get(
-        rawUrl,
-        headers = headers,
-        allowRedirects = false
-    )
+        val hasNext =
+            document.selectFirst("div.hpage a.r") != null
 
-    val verifiedUrl = if (rawUrl.contains("?")) {
-        "$rawUrl&verify_human=1"
-    } else {
-        "$rawUrl?verify_human=1"
-    }
-
-    val response2 = app.get(
-        verifiedUrl,
-        headers = headers,
-        allowRedirects = false
-    )
-
-    throw ErrorLoadingException(
-        """
-RAW URL:
-$rawUrl
-
-RESPONSE 1:
-HTTP=${response1.code}
-URL=${response1.url}
-SET-COOKIE=${response1.headers["Set-Cookie"]}
-LOCATION=${response1.headers["Location"]}
-TITLE=${response1.document.title()}
-ARTICLE=${response1.document.select("article.bs").size}
-LISTUPD=${response1.document.select(".listupd").size}
-
-VERIFIED URL:
-$verifiedUrl
-
-RESPONSE 2:
-HTTP=${response2.code}
-URL=${response2.url}
-SET-COOKIE=${response2.headers["Set-Cookie"]}
-LOCATION=${response2.headers["Location"]}
-TITLE=${response2.document.title()}
-ARTICLE=${response2.document.select("article.bs").size}
-LISTUPD=${response2.document.select(".listupd").size}
-
-BODY 2:
-${response2.text.take(1200)}
-        """.trimIndent()
-    )
+        return newHomePageResponse(
+            HomePageList(
+                request.name,
+                items
+            ),
+            hasNext
+        )
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
@@ -201,7 +170,7 @@ ${response2.text.take(1200)}
     }
 
     private fun buildMainPageUrl(page: Int, data: String): String {
-        val raw = if (data.isBlank()) {
+        return if (data.isBlank()) {
             if (page == 1) {
                 mainUrl
             } else {
@@ -209,6 +178,7 @@ ${response2.text.take(1200)}
             }
         } else {
             val base = "$mainUrl/$data"
+
             if (page <= 1) {
                 base
             } else {
@@ -216,25 +186,48 @@ ${response2.text.take(1200)}
                 "${base}${separator}page=$page"
             }
         }
-
-        return raw.withHumanVerify()
     }
 
     private suspend fun getSiteDocument(url: String): Document {
+        ensureHumanCookie()
+
         return app.get(
-            url.withHumanVerify(),
-            headers = headers,
+            url,
+            headers = verifiedHeaders(),
             referer = mainUrl
         ).document
     }
 
-    private fun String.withHumanVerify(): String {
-        val value = trim()
-        if (!value.startsWith(mainUrl, true)) return value
-        if (value.contains("verify_human=1", true)) return value
+    private suspend fun ensureHumanCookie() {
+        if (!humanCookie.isNullOrBlank()) return
 
-        val separator = if (value.contains("?")) "&" else "?"
-        return "${value}${separator}verify_human=1"
+        val response = app.get(
+            "$mainUrl/?verify_human=1",
+            headers = headers,
+            referer = mainUrl,
+            allowRedirects = false
+        )
+
+        val setCookie = response.headers["Set-Cookie"]
+            ?: response.headers["set-cookie"]
+
+        humanCookie = setCookie
+            ?.substringBefore(";")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: "user_is_human=true"
+    }
+
+    private fun verifiedHeaders(): Map<String, String> {
+        val cookie = humanCookie
+
+        return if (cookie.isNullOrBlank()) {
+            headers
+        } else {
+            headers + mapOf(
+                "Cookie" to cookie
+            )
+        }
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
