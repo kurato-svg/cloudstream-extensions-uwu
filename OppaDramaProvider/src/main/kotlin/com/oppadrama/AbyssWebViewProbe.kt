@@ -30,7 +30,7 @@ object AbyssWebViewProbe {
                 url = url,
                 stage = "Context missing",
                 checks = listOf(
-                    false to "Plugin context available"
+                    Pair(false, "Plugin context available")
                 ),
                 requests = emptyList(),
                 jsResult = "OppaRuntime.context is null"
@@ -64,6 +64,7 @@ object AbyssWebViewProbe {
 
             fun finish(stage: String, jsResult: String) {
                 runCatching {
+                    handler.removeCallbacksAndMessages(null)
                     webView.stopLoading()
                     webView.loadUrl("about:blank")
                     webView.removeAllViews()
@@ -73,18 +74,42 @@ object AbyssWebViewProbe {
                 if (continuation.isActive) {
                     val snapshot = synchronized(requests) { requests.toList() }
 
-                    val checks = listOf(
-                        true to "Plugin context available",
-                        snapshot.any { it.contains("abyss", true) } to "Abyss request seen",
-                        snapshot.any { it.contains("iamcdn", true) } to "iamcdn assets loaded",
-                        snapshot.any { it.contains("jwplayer", true) } to "JWPlayer assets requested",
-                        jsResult.contains("\"hasJw\":\"function\"") ||
-                            jsResult.contains("\\\"hasJw\\\":\\\"function\\\"") to "window.jwplayer exists",
-                        jsResult.contains(".m3u8", true) ||
-                            snapshot.any { it.contains(".m3u8", true) } to "m3u8 seen",
-                        jsResult.contains(".mp4", true) ||
-                            snapshot.any { it.contains(".mp4", true) } to "mp4 seen",
-                        snapshot.any { it.contains("sora", true) || it.contains("sssrr", true) } to "Abyss segment/domain seen"
+                    val checks: List<Pair<Boolean, String>> = listOf(
+                        Pair(true, "Plugin context available"),
+                        Pair(
+                            snapshot.any { it.contains("abyss", true) },
+                            "Abyss request seen"
+                        ),
+                        Pair(
+                            snapshot.any { it.contains("iamcdn", true) },
+                            "iamcdn assets loaded"
+                        ),
+                        Pair(
+                            snapshot.any { it.contains("jwplayer", true) },
+                            "JWPlayer assets requested"
+                        ),
+                        Pair(
+                            jsResult.contains("\"hasJw\":\"function\"") ||
+                                jsResult.contains("\\\"hasJw\\\":\\\"function\\\""),
+                            "window.jwplayer exists"
+                        ),
+                        Pair(
+                            jsResult.contains(".m3u8", true) ||
+                                snapshot.any { it.contains(".m3u8", true) },
+                            "m3u8 seen"
+                        ),
+                        Pair(
+                            jsResult.contains(".mp4", true) ||
+                                snapshot.any { it.contains(".mp4", true) },
+                            "mp4 seen"
+                        ),
+                        Pair(
+                            snapshot.any {
+                                it.contains("sora", true) ||
+                                    it.contains("sssrr", true)
+                            },
+                            "Abyss segment/domain seen"
+                        )
                     )
 
                     continuation.resume(
@@ -214,8 +239,8 @@ object AbyssWebViewProbe {
         requests: List<String>,
         jsResult: String
     ): String {
-        val checkText = checks.joinToString("\n") { (ok, text) ->
-            "[${if (ok) "✓" else "✗"}] $text"
+        val checkText = checks.joinToString("\n") { pair ->
+            "[${if (pair.first) "✓" else "✗"}] ${pair.second}"
         }
 
         val requestText = requests
