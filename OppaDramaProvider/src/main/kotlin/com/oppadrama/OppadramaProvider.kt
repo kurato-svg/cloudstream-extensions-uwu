@@ -2,7 +2,6 @@ package com.oppadrama
 
 import android.util.Log
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.ErrorLoadingException
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
@@ -239,18 +238,49 @@ class OppadramaProvider : MainAPI() {
             )
         }
 
-        sortedServers.forEach { mirror ->
+        for (mirror in sortedServers) {
             if (
                 mirror.url.contains("abyssplayer", true) ||
                 mirror.url.contains("abyss.to", true) ||
                 mirror.url.contains("hydrax", true)
             ) {
-                val report = AbyssWebViewProbe.debug(
+                val streams = AbyssWebViewProbe.extractFast(
                     url = mirror.url,
                     referer = data
                 )
 
-                throw ErrorLoadingException(report)
+                streams.forEach { stream ->
+                    val streamHeaders = stream.headers
+                        .toMutableMap()
+                        .cleanVideoHeaders()
+                        .apply {
+                            put("User-Agent", get("User-Agent") ?: USER_AGENT)
+                            put("Accept", get("Accept") ?: "*/*")
+                            put("Referer", get("Referer") ?: mirror.url)
+                        }
+
+                    Log.i(
+                        TAG,
+                        "OPPA_FAST_HYDRAX_LINK = ${stream.label} | ${stream.url} | " +
+                            streamHeaders.keys.joinToString(",")
+                    )
+
+                    callback(
+                        newExtractorLink(
+                            source = "Hydrax",
+                            name = "Hydrax ${stream.label}",
+                            url = stream.url
+                        ) {
+                            this.referer = mirror.url
+                            this.quality = getQualityFromName(stream.label)
+                            this.headers = streamHeaders
+                        }
+                    )
+                }
+
+                if (streams.isNotEmpty()) {
+                    continue
+                }
             }
 
             runCatching {
