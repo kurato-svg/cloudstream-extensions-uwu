@@ -2,9 +2,10 @@ package com.oppadrama
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
-import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.view.MotionEvent
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -18,8 +19,7 @@ import kotlin.coroutines.resume
 
 object AbyssWebViewProbe {
 
-    private const val MAX_WAIT_MS = 12000L
-    private const val JS_DELAY_MS = 6000L
+    private const val MAX_WAIT_MS = 14000L
 
     suspend fun probe(
         url: String,
@@ -55,10 +55,41 @@ object AbyssWebViewProbe {
                     lower.contains(".mp4") ||
                     lower.contains("playlist") ||
                     lower.contains("stream") ||
-                    lower.contains("media")
+                    lower.contains("media") ||
+                    lower.contains("blob:")
 
                 if (wanted && !requests.contains(value)) {
                     requests.add(value)
+                }
+            }
+
+            fun clickWebView() {
+                runCatching {
+                    val now = SystemClock.uptimeMillis()
+                    val x = 540f
+                    val y = 540f
+
+                    webView.dispatchTouchEvent(
+                        MotionEvent.obtain(
+                            now,
+                            now,
+                            MotionEvent.ACTION_DOWN,
+                            x,
+                            y,
+                            0
+                        )
+                    )
+
+                    webView.dispatchTouchEvent(
+                        MotionEvent.obtain(
+                            now,
+                            now + 80,
+                            MotionEvent.ACTION_UP,
+                            x,
+                            y,
+                            0
+                        )
+                    )
                 }
             }
 
@@ -77,8 +108,16 @@ object AbyssWebViewProbe {
                     val checks: List<Pair<Boolean, String>> = listOf(
                         Pair(true, "Plugin context available"),
                         Pair(
-                            snapshot.any { it.contains("abyss", true) },
-                            "Abyss request seen"
+                            snapshot.any { it.contains("abyssplayer.com/?v=", true) },
+                            "Original Abyss iframe requested"
+                        ),
+                        Pair(
+                            !snapshot.any { it.equals("https://abyss.to/", true) },
+                            "Not forced to abyss.to landing page"
+                        ),
+                        Pair(
+                            snapshot.any { it.contains("play.abyssplayer.com", true) },
+                            "play.abyssplayer.com requested"
                         ),
                         Pair(
                             snapshot.any { it.contains("iamcdn", true) },
@@ -89,9 +128,8 @@ object AbyssWebViewProbe {
                             "JWPlayer assets requested"
                         ),
                         Pair(
-                            jsResult.contains("\"hasJw\":\"function\"") ||
-                                jsResult.contains("\\\"hasJw\\\":\\\"function\\\""),
-                            "window.jwplayer exists"
+                            jsResult.contains("iframeCount", true),
+                            "Wrapper probe executed"
                         ),
                         Pair(
                             jsResult.contains(".m3u8", true) ||
@@ -135,10 +173,14 @@ object AbyssWebViewProbe {
             fun setup() {
                 WebView.setWebContentsDebuggingEnabled(true)
 
+                webView.layout(0, 0, 1080, 1080)
+
                 webView.settings.javaScriptEnabled = true
                 webView.settings.domStorageEnabled = true
                 webView.settings.mediaPlaybackRequiresUserGesture = false
                 webView.settings.loadsImagesAutomatically = true
+                webView.settings.javaScriptCanOpenWindowsAutomatically = true
+                webView.settings.setSupportMultipleWindows(false)
                 webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 webView.settings.userAgentString =
                     "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 Chrome/139.0 Mobile Safari/537.36"
@@ -159,22 +201,6 @@ object AbyssWebViewProbe {
                         requestUrl: String?
                     ) {
                         addRequest(requestUrl)
-
-                        handler.postDelayed({
-                            runCatching {
-                                view?.evaluateJavascript(PROBE_JS) { result ->
-                                    finish(
-                                        stage = "JavaScript probe completed",
-                                        jsResult = result ?: "null"
-                                    )
-                                }
-                            }.onFailure {
-                                finish(
-                                    stage = "JavaScript probe failed",
-                                    jsResult = it.message ?: it.toString()
-                                )
-                            }
-                        }, JS_DELAY_MS)
                     }
 
                     override fun shouldInterceptRequest(
@@ -191,33 +217,87 @@ object AbyssWebViewProbe {
                         requestUrl: String?
                     ): Boolean {
                         addRequest(requestUrl)
-                        return false
+                        return shouldBlockNavigation(requestUrl)
                     }
 
                     override fun shouldOverrideUrlLoading(
                         view: WebView?,
                         request: WebResourceRequest?
                     ): Boolean {
-                        addRequest(request?.url?.toString())
-                        return false
+                        val requestUrl = request?.url?.toString()
+                        addRequest(requestUrl)
+                        return shouldBlockNavigation(requestUrl)
                     }
                 }
 
-                val headers = mapOf(
-                    "Referer" to referer,
-                    "Origin" to Uri.parse(referer).let {
-                        "${it.scheme}://${it.host}"
-                    },
-                    "Accept-Language" to "id-ID,id;q=0.9,en-US;q=0.8"
+                /*
+                 * Abyss has this protection:
+                 * if(top.location == self.location && hostname is not *.abyss.to) window.location = "https://abyss.to"
+                 *
+                 * Direct WebView loading triggers that redirect.
+                 * The real OppaDrama website loads Abyss inside an iframe.
+                 * This wrapper copies that behaviour.
+                 */
+                val escapedUrl = url
+                    .replace("&", "&amp;")
+                    .replace("\"", "&quot;")
+
+                val wrapper = """
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                        <style>
+                            html, body, iframe {
+                                margin: 0;
+                                padding: 0;
+                                width: 100%;
+                                height: 100%;
+                                background: #000;
+                                border: 0;
+                                overflow: hidden;
+                            }
+                        </style>
+                    </head>
+                    <body>
+                        <iframe
+                            id="oppa_abyss_frame"
+                            src="$escapedUrl"
+                            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                            allowfullscreen>
+                        </iframe>
+                    </body>
+                    </html>
+                """.trimIndent()
+
+                addRequest(url)
+
+                webView.loadDataWithBaseURL(
+                    referer,
+                    wrapper,
+                    "text/html",
+                    "UTF-8",
+                    null
                 )
 
-                webView.loadUrl(url, headers)
+                handler.postDelayed({ clickWebView() }, 3500L)
+                handler.postDelayed({ clickWebView() }, 6500L)
+                handler.postDelayed({ clickWebView() }, 9500L)
 
                 handler.postDelayed({
-                    finish(
-                        stage = "Timeout after ${MAX_WAIT_MS / 1000}s",
-                        jsResult = "Probe timeout"
-                    )
+                    runCatching {
+                        webView.evaluateJavascript(PROBE_JS) { result ->
+                            finish(
+                                stage = "Iframe wrapper probe completed",
+                                jsResult = result ?: "null"
+                            )
+                        }
+                    }.onFailure {
+                        finish(
+                            stage = "Iframe wrapper probe failed",
+                            jsResult = it.message ?: it.toString()
+                        )
+                    }
                 }, MAX_WAIT_MS)
             }
 
@@ -232,6 +312,26 @@ object AbyssWebViewProbe {
         }
     }
 
+    private fun shouldBlockNavigation(requestUrl: String?): Boolean {
+        val value = requestUrl?.lowercase().orEmpty()
+
+        if (value.isBlank()) return false
+
+        val allowed = value.startsWith("about:") ||
+            value.startsWith("data:") ||
+            value.contains("45.11.57.192") ||
+            value.contains("oppa.biz") ||
+            value.contains("abyss") ||
+            value.contains("iamcdn") ||
+            value.contains("jwplayer") ||
+            value.contains("sssrr") ||
+            value.contains("sora") ||
+            value.contains(".m3u8") ||
+            value.contains(".mp4")
+
+        return !allowed
+    }
+
     private fun debugText(
         url: String,
         stage: String,
@@ -244,17 +344,17 @@ object AbyssWebViewProbe {
         }
 
         val requestText = requests
-            .take(18)
+            .take(25)
             .joinToString("\n") { it.take(180) }
             .ifBlank { "No matched request captured" }
 
         val cleanJs = jsResult
             .replace("\\n", " ")
             .replace("\\\"", "\"")
-            .take(1800)
+            .take(2200)
 
         return """
-========== OPPA WEBVIEW DEBUG ==========
+========== OPPA IFRAME DEBUG ==========
 
 Hydrax URL:
 $url
@@ -268,10 +368,10 @@ $checkText
 Captured Requests:
 $requestText
 
-JS Probe Result:
+Top Frame JS Result:
 $cleanJs
 
-========================================
+=======================================
         """.trimIndent()
     }
 
@@ -285,58 +385,24 @@ $cleanJs
     }
   }
 
-  try {
-    var overlay = document.getElementById("overlay");
-    if (overlay) overlay.click();
-  } catch(e) {}
-
   var result = {};
   result.href = location.href;
   result.title = document.title;
   result.readyState = document.readyState;
-  result.hasJw = typeof window.jwplayer;
-  result.hasSoTrym = typeof window.SoTrym;
-  result.hasDatas = typeof window.datas;
-
-  result.jwState = safe("jwState", function() {
-    if (typeof window.jwplayer === "undefined") return null;
-    return window.jwplayer().getState ? window.jwplayer().getState() : null;
+  result.iframeCount = document.querySelectorAll("iframe").length;
+  result.iframeSrcs = Array.prototype.slice.call(document.querySelectorAll("iframe")).map(function(f) {
+    return f.src || "";
   });
-
-  result.playlist = safe("playlist", function() {
-    if (typeof window.jwplayer === "undefined") return null;
-    return window.jwplayer().getPlaylist ? window.jwplayer().getPlaylist() : null;
-  });
-
-  result.playlistItem = safe("playlistItem", function() {
-    if (typeof window.jwplayer === "undefined") return null;
-    return window.jwplayer().getPlaylistItem ? window.jwplayer().getPlaylistItem() : null;
-  });
-
-  result.config = safe("config", function() {
-    if (typeof window.jwplayer === "undefined") return null;
-    return window.jwplayer().getConfig ? window.jwplayer().getConfig() : null;
-  });
-
-  result.videos = Array.prototype.slice.call(document.querySelectorAll("video")).map(function(v) {
-    return {
-      src: v.src || "",
-      currentSrc: v.currentSrc || "",
-      readyState: v.readyState,
-      networkState: v.networkState
-    };
-  });
-
-  result.sources = Array.prototype.slice.call(document.querySelectorAll("source")).map(function(s) {
-    return s.src || "";
-  });
-
-  result.htmlHints = document.documentElement.innerHTML.match(/https?:\/\/[^"'<>\\s]+/g);
-  if (result.htmlHints) {
-    result.htmlHints = result.htmlHints.filter(function(u) {
+  result.topHasJw = typeof window.jwplayer;
+  result.topHasSoTrym = typeof window.SoTrym;
+  result.bodyText = (document.body ? document.body.innerText : "").slice(0, 600);
+  result.bodyHtmlHints = safe("htmlHints", function() {
+    var html = document.documentElement.innerHTML;
+    var urls = html.match(/https?:\/\/[^"'<>\\s]+/g) || [];
+    return urls.filter(function(u) {
       return /m3u8|mp4|sora|sssrr|abyss|iamcdn|jwplayer/i.test(u);
-    }).slice(0, 30);
-  }
+    }).slice(0, 40);
+  });
 
   return JSON.stringify(result);
 })()
