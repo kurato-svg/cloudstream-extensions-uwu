@@ -25,6 +25,12 @@ class OppadramaProvider : MainAPI() {
     private var humanCookie: String? = null
     private var checkedAddress = false
 
+    private data class ServerMirror(
+        val label: String,
+        val url: String
+    )
+
+
     private val headers = mapOf(
         "User-Agent" to USER_AGENT,
         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -140,140 +146,117 @@ class OppadramaProvider : MainAPI() {
     ): Boolean {
         val document = getSiteDocument(data)
 
-        val rawLinks = linkedSetOf<String>()
+        val serverLinks = linkedMapOf<String, ServerMirror>()
 
-        document.select("div.player-embed iframe")
+        fun addServer(
+            label: String,
+            rawUrl: String?
+        ) {
+            val fixedUrl = rawUrl
+                ?.toAbsoluteUrl(data)
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: return
+
+            val cleanLabel = label
+                .replace("\\s+".toRegex(), " ")
+                .trim()
+                .ifBlank { "Server" }
+
+            if (!serverLinks.containsKey(fixedUrl)) {
+                serverLinks[fixedUrl] = ServerMirror(
+                    label = cleanLabel,
+                    url = fixedUrl
+                )
+            }
+        }
+
+        /*
+         * OppaDrama stores the current/default player directly here.
+         * Example:
+         * <div id="pembed"><iframe src="https://emturbovid.com/t/..."></iframe></div>
+         */
+        document.select("#pembed iframe, div.player-embed iframe")
             .forEach { iframe ->
-                iframe.getIframeUrl()
-                    ?.toAbsoluteUrl(data)
-                    ?.also { rawLinks.add(it) }
+                addServer(
+                    label = "Default",
+                    rawUrl = iframe.getIframeUrl()
+                )
             }
 
-        document.select("select.mirror option[value]")
+        /*
+         * OppaDrama server dropdown stores each server as base64 iframe HTML.
+         * Example option value decodes to:
+         * <iframe src="https://emturbovid.com/t/..."></iframe>
+         */
+        document.select("select.mirror option[data-index], select.mirror option[value]")
             .forEach { option ->
+                val optionValue = option.attr("value").trim()
+                if (optionValue.isBlank()) return@forEach
+
+                val label = option.text()
+                    .replace("\\s+".toRegex(), " ")
+                    .trim()
+                    .ifBlank {
+                        "Server ${option.attr("data-index").ifBlank { "?" }}"
+                    }
+
                 decodeMirror(
-                    option.attr("value"),
-                    option.text(),
-                    data
+                    value = optionValue,
+                    label = label,
+                    referer = data
                 ).forEach { link ->
-                    rawLinks.add(link)
+                    addServer(
+                        label = label,
+                        rawUrl = link
+                    )
                 }
             }
 
+        /*
+         * Keep download/external links as a low-priority fallback only.
+         */
         document.select("div.dlbox a[href]")
             .forEach { anchor ->
                 anchor.attr("href")
                     .trim()
                     .takeIf { it.startsWith("http", true) }
-                    ?.also { rawLinks.add(it) }
+                    ?.let { addServer("Download", it) }
             }
 
-        rawLinks.forEach {
-            Log.i(TAG, "OPPA_RAW = $it")
+        val sortedServers = serverLinks.values
+            .distinctBy { it.url }
+            .sortedWith(
+                compareBy<ServerMirror> { it.url.priorityScore() }
+                    .thenBy { it.label.lowercase() }
+            )
+
+        sortedServers.forEachIndexed { index, mirror ->
+            Log.i(
+                TAG,
+                "OPPA_SERVER[$index] = ${mirror.label} | ${mirror.url}"
+            )
         }
 
-        val sortedLinks = rawLinks
-            .filter { it.isNotBlank() }
-            .distinct()
-            .sortedBy { it.priorityScore() }
-
-        sortedLinks.forEach {
-            Log.i(TAG, "OPPA_SORTED = $it")
-        }
-
-        for (link in sortedLinks) {
-            if (
-                link.contains("abyss", true) ||
-                link.contains("hydrax", true)
-            ) {
-                val streams = runCatching {
-                    AbyssWebViewProbe.extract(
-                        url = link,
-                        referer = data
-                    )
-                }.onFailure {
-                    Log.e(TAG, "OPPA_ABYSS_EXTRACT_FAILED = ${it.message}", it)
-                }.getOrDefault(emptyList())
-
-                streams.forEach { stream ->
-                    val fixedUrl = stream.url.toAbsoluteStreamUrl()
-
-                    Log.i(TAG, "OPPA_ABYSS_LINK = ${stream.label} | $fixedUrl")
-                    Log.i(
-                        TAG,
-                        "OPPA_ABYSS_HEADER_KEYS = ${stream.label} | " +
-                            stream.headers.keys.joinToString(",") +
-                            " | cookie=${if (stream.headers.containsKey("Cookie")) "yes" else "no"}"
-                    )
-
-                    val webHeaders = stream.headers
-                        .toMutableMap()
-                        .cleanAbyssHeaders()
-                        .apply {
-                            put("Referer", link)
-                            put("User-Agent", USER_AGENT)
-                            put("Accept", get("Accept") ?: "*/*")
-                        }
-
-                    val minimalHeaders = mapOf(
-                        "Referer" to link,
-                        "User-Agent" to USER_AGENT,
-                        "Accept" to "*/*"
-                    )
-
-                    val videoFetchHeaders = webHeaders
-                        .toMutableMap()
-                        .apply {
-                            put("Sec-Fetch-Dest", "video")
-                            put("Sec-Fetch-Mode", "no-cors")
-                            put("Sec-Fetch-Site", "cross-site")
-                        }
-
-                    val variants = listOf(
-                        "Web" to webHeaders,
-                        "Minimal" to minimalHeaders,
-                        "Fetch" to videoFetchHeaders
-                    )
-
-                    variants.forEach { variant ->
-                        Log.i(
-                            TAG,
-                            "OPPA_ABYSS_VARIANT = ${stream.label} ${variant.first} | " +
-                                variant.second.keys.joinToString(",")
-                        )
-
-                        callback(
-                            newExtractorLink(
-                                source = "Abyss",
-                                name = "Abyss ${stream.label} ${variant.first}",
-                                url = fixedUrl
-                            ) {
-                                this.referer = link
-                                this.quality = getQualityFromName(stream.label)
-                                this.headers = variant.second
-                            }
-                        )
-                    }
-                }
-
-                if (streams.isNotEmpty()) {
-                    return true
-                }
-            }
-
+        sortedServers.forEach { mirror ->
             runCatching {
+                Log.i(TAG, "OPPA_TRY_EXTRACTOR = ${mirror.label} | ${mirror.url}")
+
                 loadExtractor(
-                    link,
+                    mirror.url,
                     data,
                     subtitleCallback,
                     callback
                 )
             }.onFailure {
-                Log.e(TAG, "OPPA_EXTRACTOR_FAILED = $link | ${it.message}")
+                Log.e(
+                    TAG,
+                    "OPPA_EXTRACTOR_FAILED = ${mirror.label} | ${mirror.url} | ${it.message}"
+                )
             }
         }
 
-        return sortedLinks.isNotEmpty()
+        return sortedServers.isNotEmpty()
     }
 
     private fun buildMainPageUrl(page: Int, data: String): String {
@@ -468,20 +451,6 @@ class OppadramaProvider : MainAPI() {
         val lowerLabel = cleanLabel.lowercase()
         val results = linkedSetOf<String>()
 
-        /*
-         * For this diagnostic version, skip mirrors that the website itself
-         * cannot play. This avoids WebViewResolver wasting 15 to 30 seconds
-         * on dead StreamSB/GDrive routes and lets us see Hydrax clearly.
-         */
-        if (
-            lowerLabel.contains("streamsb") ||
-            lowerLabel.contains("gdrive") ||
-            lowerLabel.contains("google")
-        ) {
-            Log.i(TAG, "OPPA_SKIP_MIRROR label=$cleanLabel")
-            return emptyList()
-        }
-
         Jsoup.parse(decoded)
             .select("iframe")
             .mapNotNull { it.getIframeUrl() }
@@ -611,12 +580,22 @@ class OppadramaProvider : MainAPI() {
         val value = lowercase()
 
         return when {
-            value.contains("vidhide") ||
-                value.contains("earnvid") -> 0
+            /*
+             * These are the actual visible servers on current OppaDrama pages.
+             */
+            value.contains("emturbovid") ||
+                value.contains("turbovidhls") -> 0
+
+            value.contains("minochinos") ||
+                value.contains("filelions") ||
+                value.contains("filemoon") -> 1
 
             value.contains("abyss.to") ||
                 value.contains("abyssplayer") ||
-                value.contains("hydrax") -> 1
+                value.contains("hydrax") -> 2
+
+            value.contains("vidhide") ||
+                value.contains("earnvid") -> 3
 
             value.contains("sbembed1") ||
                 value.contains("sbembed4") ||
@@ -628,13 +607,7 @@ class OppadramaProvider : MainAPI() {
                 value.contains("playersb") ||
                 value.contains("sbembed") ||
                 value.contains("sbplay") ||
-                value.contains("streamsss") -> 2
-
-            value.contains("emturbovid") -> 3
-
-            value.contains("minochinos") ||
-                value.contains("filelions") ||
-                value.contains("filemoon") -> 4
+                value.contains("streamsss") -> 4
 
             value.contains("drive.google") -> 5
 
