@@ -591,6 +591,23 @@ class OppadramaProvider : MainAPI() {
 
 
 
+
+    private fun MutableMap<String, String>.cleanVideoHeaders(): MutableMap<String, String> {
+        val blocked = setOf(
+            "host",
+            "connection",
+            "accept-encoding"
+        )
+
+        keys.toList().forEach { key ->
+            if (key.lowercase() in blocked) {
+                remove(key)
+            }
+        }
+
+        return this
+    }
+
     private fun MutableMap<String, String>.cleanAbyssHeaders(): MutableMap<String, String> {
         val blocked = setOf(
             "host",
