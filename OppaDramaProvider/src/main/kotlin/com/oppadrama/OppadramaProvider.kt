@@ -13,7 +13,7 @@ import java.net.URLEncoder
 
 class OppadramaProvider : MainAPI() {
 
-    override var mainUrl = "https://oppa.biz"
+    override var mainUrl = "http://45.11.57.192"
     override var name = "OppaDrama"
     override var lang = "id"
 
