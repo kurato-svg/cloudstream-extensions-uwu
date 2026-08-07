@@ -199,6 +199,12 @@ class OppadramaProvider : MainAPI() {
                     val fixedUrl = stream.url.toAbsoluteStreamUrl()
 
                     Log.i(TAG, "OPPA_ABYSS_LINK = ${stream.label} | $fixedUrl")
+                    Log.i(
+                        TAG,
+                        "OPPA_ABYSS_HEADER_KEYS = ${stream.label} | " +
+                            stream.headers.keys.joinToString(",") +
+                            " | cookie=${if (stream.headers.containsKey("Cookie")) "yes" else "no"}"
+                    )
 
                     callback(
                         newExtractorLink(
@@ -208,12 +214,23 @@ class OppadramaProvider : MainAPI() {
                         ) {
                             this.referer = link
                             this.quality = getQualityFromName(stream.label)
-                            this.headers = mapOf(
-                                "Referer" to link,
-                                "Origin" to "https://abyssplayer.com",
-                                "User-Agent" to USER_AGENT,
-                                "Accept" to "*/*"
-                            )
+                            this.headers = stream.headers
+                                .toMutableMap()
+                                .apply {
+                                    remove("Host")
+                                    remove("host")
+                                    remove("Connection")
+                                    remove("connection")
+                                    remove("Accept-Encoding")
+                                    remove("accept-encoding")
+                                    remove("Range")
+                                    remove("range")
+
+                                    put("Referer", link)
+                                    put("Origin", "https://abyssplayer.com")
+                                    put("User-Agent", USER_AGENT)
+                                    put("Accept", get("Accept") ?: "*/*")
+                                }
                         }
                     )
                 }

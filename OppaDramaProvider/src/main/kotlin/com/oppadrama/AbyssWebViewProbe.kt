@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.MotionEvent
+import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -27,7 +28,8 @@ object AbyssWebViewProbe {
 
     data class AbyssStream(
         val label: String,
-        val url: String
+        val url: String,
+        val headers: Map<String, String> = emptyMap()
     )
 
     suspend fun extract(
@@ -39,6 +41,7 @@ object AbyssWebViewProbe {
 
         suspendCancellableCoroutine { continuation ->
             val captures = Collections.synchronizedList(mutableListOf<String>())
+            val streamHeaders = Collections.synchronizedMap(mutableMapOf<String, Map<String, String>>())
             val handler = Handler(Looper.getMainLooper())
             val webView = WebView(context)
 
@@ -81,6 +84,33 @@ object AbyssWebViewProbe {
                 }
             }
 
+            fun captureStreamRequest(request: WebResourceRequest?) {
+                val requestUrl = request?.url?.toString() ?: return
+                if (!isStreamUrl(requestUrl)) return
+
+                val fixedUrl = requestUrl.toAbsoluteStreamUrl()
+
+                val headers = request.requestHeaders
+                    .orEmpty()
+                    .toMutableMap()
+
+                val cookie = runCatching {
+                    CookieManager.getInstance().getCookie(requestUrl)
+                }.getOrNull().orEmpty()
+
+                if (cookie.isNotBlank()) {
+                    headers["Cookie"] = cookie
+                }
+
+                streamHeaders[fixedUrl] = headers
+
+                addCapture(
+                    "OPPA_STREAM_REQUEST = $fixedUrl | headers=" +
+                        headers.keys.joinToString(",") +
+                        " | cookie=${if (cookie.isNotBlank()) "yes" else "no"}"
+                )
+            }
+
             fun finish(jsResult: String?) {
                 runCatching {
                     handler.removeCallbacksAndMessages(null)
@@ -94,8 +124,15 @@ object AbyssWebViewProbe {
                     extractCaptures(jsResult)
                         .forEach { addCapture(it) }
 
-                    val snapshot = synchronized(captures) { captures.toList() }
-                    continuation.resume(parseStreams(snapshot))
+                    val captureSnapshot = synchronized(captures) { captures.toList() }
+                    val headerSnapshot = synchronized(streamHeaders) { streamHeaders.toMap() }
+
+                    continuation.resume(
+                        parseStreams(
+                            captures = captureSnapshot,
+                            streamHeaders = headerSnapshot
+                        )
+                    )
                 }
             }
 
@@ -109,6 +146,10 @@ object AbyssWebViewProbe {
             @SuppressLint("SetJavaScriptEnabled")
             fun setup() {
                 WebView.setWebContentsDebuggingEnabled(true)
+
+                val cookieManager = CookieManager.getInstance()
+                cookieManager.setAcceptCookie(true)
+                cookieManager.setAcceptThirdPartyCookies(webView, true)
 
                 webView.layout(0, 0, 1080, 1080)
 
@@ -150,6 +191,22 @@ object AbyssWebViewProbe {
                                     referer = referer
                                 )
                             }.getOrNull()
+                        }
+
+                        /*
+                         * Important:
+                         * Abyss / sssrr links appear to be short-lived or single-use.
+                         * In v19 the hidden WebView consumed the stream first, then Exo got 404.
+                         * Here we capture the URL and headers, but block WebView from consuming it.
+                         */
+                        if (isStreamUrl(requestUrl)) {
+                            captureStreamRequest(request)
+
+                            return WebResourceResponse(
+                                "video/mp4",
+                                "UTF-8",
+                                ByteArrayInputStream(ByteArray(0))
+                            )
                         }
 
                         return super.shouldInterceptRequest(view, request)
@@ -269,6 +326,20 @@ object AbyssWebViewProbe {
 
         val html = connection.inputStream.bufferedReader().use { it.readText() }
 
+        connection.headerFields
+            .filterKeys { it?.equals("Set-Cookie", true) == true }
+            .values
+            .flatten()
+            .forEach { cookie ->
+                runCatching {
+                    CookieManager.getInstance().setCookie(pageUrl, cookie)
+                }
+            }
+
+        runCatching {
+            CookieManager.getInstance().flush()
+        }
+
         val injected = when {
             html.contains("<head>", true) ->
                 html.replaceFirst(
@@ -290,8 +361,22 @@ object AbyssWebViewProbe {
         }
     }
 
-    private fun parseStreams(captures: List<String>): List<AbyssStream> {
+    private fun parseStreams(
+        captures: List<String>,
+        streamHeaders: Map<String, Map<String, String>>
+    ): List<AbyssStream> {
         val results = linkedMapOf<String, AbyssStream>()
+
+        fun add(label: String, file: String) {
+            val fixedFile = file.toAbsoluteStreamUrl()
+            val headers = streamHeaders[fixedFile].orEmpty()
+
+            results[fixedFile] = AbyssStream(
+                label = label,
+                url = fixedFile,
+                headers = headers
+            )
+        }
 
         captures.forEach { line ->
             if (!line.contains("OPPA_SOURCE", true)) return@forEach
@@ -307,10 +392,7 @@ object AbyssWebViewProbe {
                 ?.takeIf { it.isNotBlank() }
                 ?: return@forEach
 
-            results[file] = AbyssStream(
-                label = label,
-                url = file
-            )
+            add(label, file)
         }
 
         if (results.isNotEmpty()) {
@@ -334,10 +416,7 @@ object AbyssWebViewProbe {
                         ?.takeIf { it.isNotBlank() }
                         ?: return@forEach
 
-                    results[file] = AbyssStream(
-                        label = label,
-                        url = file
-                    )
+                    add(label, file)
                 }
         }
 
@@ -351,6 +430,24 @@ object AbyssWebViewProbe {
             .findAll(value)
             .map { it.value }
             .toList()
+    }
+
+    private fun isStreamUrl(requestUrl: String?): Boolean {
+        val value = requestUrl?.lowercase().orEmpty()
+
+        return value.contains("sssrr.org/sora/") ||
+            value.contains("/sora/")
+    }
+
+    private fun String.toAbsoluteStreamUrl(): String {
+        val value = trim()
+
+        return when {
+            value.startsWith("//") -> "https:$value"
+            value.startsWith("http", true) -> value
+            value.startsWith("/") -> "https://abyssplayer.com$value"
+            else -> value
+        }
     }
 
     private fun shouldBlockNavigation(requestUrl: String?): Boolean {
