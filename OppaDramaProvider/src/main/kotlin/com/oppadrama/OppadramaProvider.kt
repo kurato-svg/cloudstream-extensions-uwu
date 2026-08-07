@@ -6,16 +6,15 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URI
+import java.net.URLEncoder
 
 class OppadramaProvider : MainAPI() {
 
     override var mainUrl = "http://45.11.57.192"
-
     override var name = "OppaDrama"
-
     override var lang = "id"
-
     override val hasMainPage = true
+    override val hasDownloadSupport = true
 
     override val supportedTypes = setOf(
         TvType.Movie,
@@ -48,16 +47,20 @@ class OppadramaProvider : MainAPI() {
             request.data.isBlank() -> {
                 if (page == 1) mainUrl else "$mainUrl/page/$page/"
             }
+
             else -> {
                 val separator = if (request.data.contains("?")) "&" else "?"
                 "$mainUrl/${request.data}${separator}page=$page"
             }
         }
 
-        val document = app.get(url, headers = headers).document
+        val document = app.get(
+            url,
+            headers = headers
+        ).document
 
         val items = document
-            .select("div.listupd > div.excstf > article.bs")
+            .select("div.listupd article.bs, div.listupd article.stylefor")
             .mapNotNull { it.toSearchResult() }
 
         val hasNext = document.selectFirst("div.hpage a.r") != null
@@ -68,70 +71,144 @@ class OppadramaProvider : MainAPI() {
         )
     }
 
-    private fun Element.toSearchResult(): SearchResponse? {
-        val anchor = selectFirst("a[href]") ?: return null
-        val href = fixUrl(anchor.attr("href"))
-
-        val title = anchor.attr("title")
-            .ifBlank { selectFirst(".tt")?.ownText() }
-            .ifBlank { selectFirst("h2")?.text() }
-            ?.trim() ?: return null
-
-        if (title.isBlank()) return null
-
-        val poster = selectFirst("img")?.getImageUrl()?.let(::fixUrl)
-        val badge = selectFirst(".typez")?.text()?.lowercase() ?: ""
-
-        return if (badge.contains("movie") || href.contains("/movie-", true)) {
-            newMovieSearchResponse(title, href, TvType.Movie) {
-                this.posterUrl = poster
-            }
-        } else {
-            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
-                this.posterUrl = poster
-            }
-        }
-    }
-
     override suspend fun search(query: String): List<SearchResponse> {
+        val encoded = URLEncoder.encode(query, Charsets.UTF_8.name())
+
         val document = app.get(
-            "$mainUrl/?s=${query.replace(" ", "+")}",
+            "$mainUrl/?s=$encoded",
             headers = headers
         ).document
 
         return document
-            .select("div.listupd > div.excstf > article.bs")
+            .select("div.listupd article.bs, div.listupd article.stylefor")
             .mapNotNull { it.toSearchResult() }
     }
 
-    override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url, headers = headers).document
+    private fun Element.toSearchResult(): SearchResponse? {
+        val anchor = selectFirst("a[href]") ?: return null
+        val href = anchor.attr("href").trim().takeIf { it.isNotBlank() } ?: return null
+        val fixedUrl = fixUrl(href)
 
-        val title = document.titleText() ?: throw ErrorLoadingException("Title not found")
-        val poster = document.poster()
-        val plot = document.descriptionText()
-        val tags = document.tagsList()
-        val year = parseYear(document.getInfo("Tahun") ?: document.getInfo("Year"))
-        val status = parseStatus(document.getInfo("Status"))
+        val title = anchor.attr("title")
+            .ifBlank { selectFirst(".tt")?.ownText().orEmpty() }
+            .ifBlank { selectFirst("h2")?.text().orEmpty() }
+            .trim()
 
-        val isMovie = url.contains("/movie-", true)
+        if (title.isBlank()) return null
+
+        val poster = selectFirst("img")
+            ?.getImageUrl()
+            ?.let { fixUrl(it) }
+
+        val badge = selectFirst(".typez")
+            ?.text()
+            ?.lowercase()
+            .orEmpty()
+
+        val isMovie = badge.contains("movie") || fixedUrl.contains("/movie-", true)
 
         return if (isMovie) {
-            newMovieLoadResponse(title, url, TvType.Movie, url) {
-                this.posterUrl = poster
-                this.year = year
-                this.tags = tags
-                this.plot = plot
-                this.recommendations = document.recommendations()
+            newMovieSearchResponse(
+                title,
+                fixedUrl,
+                TvType.Movie
+            ) {
+                posterUrl = poster
             }
         } else {
-            newTvSeriesLoadResponse(title, url, TvType.TvSeries, document.episodes()) {
-                this.posterUrl = poster
+            newTvSeriesSearchResponse(
+                title,
+                fixedUrl,
+                TvType.TvSeries
+            ) {
+                posterUrl = poster
+            }
+        }
+    }
+
+    override suspend fun load(url: String): LoadResponse {
+        val firstDocument = app.get(
+            url,
+            headers = headers
+        ).document
+
+        val isEpisodePage = url.contains("-episode-", true)
+        val isMovie = url.contains("/movie-", true)
+
+        val seriesUrl = if (!isMovie && isEpisodePage) {
+            firstDocument.findSeriesUrl()
+        } else {
+            null
+        }
+
+        val document = if (!seriesUrl.isNullOrBlank()) {
+            app.get(seriesUrl, headers = headers).document
+        } else {
+            firstDocument
+        }
+
+        val loadUrl = seriesUrl ?: url
+
+        val title = document.titleText()
+            ?: firstDocument.titleText()
+            ?: throw ErrorLoadingException("Title not found")
+
+        val poster = document.poster()
+            ?: firstDocument.poster()
+
+        val plot = document.descriptionText()
+            ?: firstDocument.descriptionText()
+
+        val tags = document.tagsList()
+
+        val year = parseYear(
+            document.getInfo("Tahun")
+                ?: document.getInfo("Year")
+                ?: document.text()
+        )
+
+        val status = parseStatus(
+            document.getInfo("Status")
+                ?: document.text()
+        )
+
+        val episodes = document.episodes().ifEmpty {
+            if (!isMovie) {
+                listOf(
+                    newEpisode(url) {
+                        name = firstDocument.titleText() ?: title
+                        episode = firstDocument.titleText()?.safeInt()
+                    }
+                )
+            } else {
+                emptyList()
+            }
+        }
+
+        return if (isMovie) {
+            newMovieLoadResponse(
+                title,
+                loadUrl,
+                TvType.Movie,
+                url
+            ) {
+                posterUrl = poster
                 this.year = year
                 this.tags = tags
                 this.plot = plot
-                this.showStatus = status
-                this.recommendations = document.recommendations()
+            }
+        } else {
+            newTvSeriesLoadResponse(
+                title,
+                loadUrl,
+                TvType.TvSeries,
+                episodes
+            ) {
+                posterUrl = poster
+                this.year = year
+                this.tags = tags
+                this.plot = plot
+                if (status != null) showStatus = status
             }
         }
     }
@@ -142,7 +219,6 @@ class OppadramaProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-
         val document = app.get(
             data,
             headers = headers,
@@ -151,25 +227,29 @@ class OppadramaProvider : MainAPI() {
 
         val links = linkedSetOf<String>()
 
-        // Main player
-        document.select("div.player-embed iframe").forEach { iframe ->
-            iframe.getIframeUrl()
-                ?.takeIf { it.isNotBlank() }
-                ?.let(::fixUrl)
-                ?.let(links::add)
-        }
+        document.select("div.player-embed iframe")
+            .forEach { iframe ->
+                iframe.getIframeUrl()
+                    ?.toAbsoluteUrl(data)
+                    ?.takeIf { it.isNotBlank() }
+                    ?.also { links.add(it) }
+            }
 
-        // Mirror selector
-        document.select("select.mirror option[value]").forEach { option ->
-            decodeMirror(option.attr("value"), data)?.let(links::add)
-        }
+        document.select("select.mirror option[value]")
+            .forEach { option ->
+                decodeMirror(
+                    option.attr("value"),
+                    data
+                )?.also { links.add(it) }
+            }
 
-        // Download fallback
-        document.select("div.dlbox a[href]").forEach {
-            it.attr("href")
-                .takeIf { link -> link.startsWith("http") }
-                ?.let(links::add)
-        }
+        document.select("div.dlbox a[href]")
+            .forEach { anchor ->
+                anchor.attr("href")
+                    .trim()
+                    .takeIf { it.startsWith("http", true) }
+                    ?.also { links.add(it) }
+            }
 
         links.forEach { link ->
             runCatching {
@@ -180,143 +260,165 @@ class OppadramaProvider : MainAPI() {
                     callback
                 )
             }.onFailure {
-                println(it)
+                println("OppaDrama extractor failed: ${it.message}")
             }
         }
 
         return links.isNotEmpty()
     }
 
-    private fun decodeMirror(
-        value: String,
-        referer: String
-    ): String? {
+    private fun decodeMirror(value: String, referer: String): String? {
+        val cleaned = value.trim()
+        if (cleaned.isBlank()) return null
 
-        if (value.isBlank()) return null
-
-        if (value.startsWith("http") || value.startsWith("//")) {
-            return fixUrl(value)
+        if (
+            cleaned.startsWith("http", true) ||
+            cleaned.startsWith("//") ||
+            cleaned.startsWith("/")
+        ) {
+            return cleaned.toAbsoluteUrl(referer)
         }
 
         return runCatching {
-            val html = base64Decode(value)
+            val html = base64Decode(cleaned.replace(Regex("\\s"), ""))
             Jsoup.parse(html)
                 .selectFirst("iframe")
                 ?.getIframeUrl()
-                ?.let {
-                    if (it.startsWith("//")) "https:$it" else fixUrl(it)
-                }
+                ?.toAbsoluteUrl(referer)
         }.getOrNull()
     }
-}
 
-// ==========================================
-// Extension / Helper Functions
-// ==========================================
-
-private fun Element.getImageUrl(): String? {
-    return when {
-        attr("data-src").isNotBlank() -> attr("data-src")
-        attr("data-lazy-src").isNotBlank() -> attr("data-lazy-src")
-        attr("data-original").isNotBlank() -> attr("data-original")
-        attr("src").isNotBlank() -> attr("src")
-        attr("srcset").isNotBlank() -> attr("srcset").substringBefore(",").substringBefore(" ")
-        else -> null
-    }
-}
-
-private fun Element.getIframeUrl(): String? {
-    return when {
-        attr("data-litespeed-src").isNotBlank() -> attr("data-litespeed-src")
-        attr("data-src").isNotBlank() -> attr("data-src")
-        attr("src").isNotBlank() -> attr("src")
-        else -> null
-    }
-}
-
-private fun Document.getInfo(key: String): String? {
-    return select("div.spe span")
-        .firstOrNull { it.text().startsWith("$key:", true) }
-        ?.text()
-        ?.substringAfter(":")
-        ?.trim()
-}
-
-private fun parseYear(text: String?): Int? {
-    return Regex("(19|20)\\d{2}").find(text ?: "")?.value?.toIntOrNull()
-}
-
-private fun parseStatus(text: String?): ShowStatus? {
-    val value = text?.lowercase() ?: return null
-    return when {
-        value.contains("completed") -> ShowStatus.Completed
-        value.contains("ongoing") -> ShowStatus.Ongoing
-        else -> null
-    }
-}
-
-private fun Element.poster(): String? {
-    return getImageUrl()?.let(::fixUrl)
-}
-
-private fun String.safeInt(): Int? {
-    return Regex("\\d+").find(this)?.value?.toIntOrNull()
-}
-
-private fun Document.recommendations(): List<SearchResponse> {
-    return select("div.listupd article.bs").mapNotNull {
-        it.toSearchResultPrivate()
-    }
-}
-
-private fun Element.toSearchResultPrivate(): SearchResponse? {
-    val anchor = selectFirst("a[href]") ?: return null
-    val href = fixUrl(anchor.attr("href"))
-
-    val title = anchor.attr("title")
-        .ifBlank { selectFirst(".tt")?.ownText() }
-        .ifBlank { selectFirst("h2")?.text() }
-        ?.trim() ?: return null
-
-    if (title.isBlank()) return null
-    val poster = selectFirst("img")?.getImageUrl()?.let(::fixUrl)
-
-    return newMovieSearchResponse(title, href, TvType.Movie) {
-        this.posterUrl = poster
-    }
-}
-
-private fun Document.episodes(): List<Episode> {
-    return select("div.eplister li a")
-        .reversed()
-        .mapIndexed { index, element ->
-            val ep = element
-                .selectFirst(".epl-num")
-                ?.text()
-                ?.safeInt()
-                ?: (index + 1)
-
-            newEpisode(fixUrl(element.attr("href"))) {
-                episode = ep
-                name = element.selectFirst(".epl-title")?.text()?.trim()
+    private fun Document.findSeriesUrl(): String? {
+        return select("a[href]")
+            .firstOrNull { element ->
+                val href = element.attr("href")
+                href.startsWith(mainUrl) &&
+                    !href.contains("-episode-", true) &&
+                    !href.contains("/movie-", true) &&
+                    element.text().isNotBlank()
             }
+            ?.attr("href")
+            ?.let { fixUrl(it) }
+    }
+
+    private fun Document.episodes(): List<Episode> {
+        return select("div.eplister li a[href]")
+            .reversed()
+            .mapIndexed { index, element ->
+                val epNum = element
+                    .selectFirst(".epl-num")
+                    ?.text()
+                    ?.safeInt()
+                    ?: index + 1
+
+                newEpisode(
+                    fixUrl(element.attr("href"))
+                ) {
+                    episode = epNum
+                    name = element
+                        .selectFirst(".epl-title")
+                        ?.text()
+                        ?.trim()
+                }
+            }
+    }
+
+    private fun Document.poster(): String? {
+        return selectFirst(".thumb img, .poster img, .bigcontent img")
+            ?.getImageUrl()
+            ?.let { fixUrl(it) }
+    }
+
+    private fun Document.titleText(): String? {
+        return selectFirst("h1.entry-title, h1")
+            ?.text()
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+    }
+
+    private fun Document.descriptionText(): String? {
+        return select(".entry-content p")
+            .map { it.text().trim() }
+            .filter { it.isNotBlank() }
+            .joinToString("\n")
+            .takeIf { it.isNotBlank() }
+    }
+
+    private fun Document.tagsList(): List<String> {
+        return select(".genxed a")
+            .map { it.text().trim() }
+            .filter { it.isNotBlank() }
+    }
+
+    private fun Document.getInfo(key: String): String? {
+        return select("div.spe span, .spe span")
+            .firstOrNull { element ->
+                element.text().startsWith("$key:", true)
+            }
+            ?.text()
+            ?.substringAfter(":")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+    }
+
+    private fun Element.getImageUrl(): String? {
+        return when {
+            attr("data-src").isNotBlank() -> attr("data-src")
+            attr("data-lazy-src").isNotBlank() -> attr("data-lazy-src")
+            attr("data-original").isNotBlank() -> attr("data-original")
+            attr("src").isNotBlank() -> attr("src")
+            attr("srcset").isNotBlank() -> attr("srcset")
+                .substringBefore(",")
+                .substringBefore(" ")
+            else -> null
         }
-}
+    }
 
-private fun Document.poster(): String? {
-    return selectFirst(".thumb img, .poster img, .bigcontent img")?.poster()
-}
+    private fun Element.getIframeUrl(): String? {
+        return when {
+            attr("data-litespeed-src").isNotBlank() -> attr("data-litespeed-src")
+            attr("data-src").isNotBlank() -> attr("data-src")
+            attr("src").isNotBlank() -> attr("src")
+            else -> null
+        }
+    }
 
-private fun Document.titleText(): String? {
-    return selectFirst("h1.entry-title, h1")?.text()?.trim()
-}
+    private fun String.toAbsoluteUrl(referer: String): String? {
+        val value = trim()
+        if (value.isBlank()) return null
 
-private fun Document.descriptionText(): String? {
-    return select(".entry-content p")
-        .joinToString("\n") { it.text().trim() }
-        .ifBlank { null }
-}
+        return runCatching {
+            when {
+                value.startsWith("http://", true) -> value
+                value.startsWith("https://", true) -> value
+                value.startsWith("//") -> "https:$value"
+                value.startsWith("/") -> "${mainUrl.trimEnd('/')}$value"
+                else -> URI(referer).resolve(value).toString()
+            }
+        }.getOrNull()
+    }
 
-private fun Document.tagsList(): List<String> {
-    return select(".genxed a").map { it.text().trim() }
+    private fun String.safeInt(): Int? {
+        return Regex("\\d+")
+            .find(this)
+            ?.value
+            ?.toIntOrNull()
+    }
+
+    private fun parseYear(text: String?): Int? {
+        return Regex("(19|20)\\d{2}")
+            .find(text ?: "")
+            ?.value
+            ?.toIntOrNull()
+    }
+
+    private fun parseStatus(text: String?): ShowStatus? {
+        val value = text?.lowercase() ?: return null
+
+        return when {
+            value.contains("completed") -> ShowStatus.Completed
+            value.contains("ongoing") -> ShowStatus.Ongoing
+            else -> null
+        }
+    }
 }
