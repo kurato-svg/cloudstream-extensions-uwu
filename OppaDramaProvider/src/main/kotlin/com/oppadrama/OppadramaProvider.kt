@@ -50,7 +50,40 @@ private val headers = mapOf(
 
     "series/?country[]=thailand&type=Drama&order=update" to "Thailand"
 )
-    
+    override suspend fun getMainPage(
+    page: Int,
+    request: MainPageRequest
+): HomePageResponse {
+
+    val url = if (request.data.isBlank()) {
+        "$mainUrl/page/$page/"
+    } else {
+        val sep = if (request.data.contains("?")) "&" else "?"
+        "$mainUrl/${request.data}$sep$page=$page"
+    }
+
+    val document = app.get(
+        url,
+        headers = headers
+    ).document
+
+    val items = document
+        .select("div.listupd article.bs")
+        .mapNotNull {
+            it.toSearchResult()
+        }
+
+    val hasNext =
+        document.selectFirst("div.hpage a.r") != null
+
+    return newHomePageResponse(
+        HomePageList(
+            request.name,
+            items
+        ),
+        hasNext
+    )
+    }
 
     private fun Element.toSearchResult(): SearchResponse? {
 
@@ -101,7 +134,7 @@ private val headers = mapOf(
         newTvSeriesSearchResponse(
     title,
     href,
-    TvType.AsianDrama
+    TvType.TvSeries
 )
         {
 
@@ -208,17 +241,12 @@ private val headers = mapOf(
                 it.toSearchResult()
             }
 
-    return newTvSeriesLoadResponse(
-
-        title,
-
-        url,
-
-        TvType.AsianDrama,
-
-        episodes
-
-    ) {
+    return 
+        newTvSeriesLoadResponse(
+    title,
+    url,
+    TvType.TvSeries,
+            {
 
         posterUrl = poster
 
