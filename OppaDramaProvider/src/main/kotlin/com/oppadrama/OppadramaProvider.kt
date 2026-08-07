@@ -282,7 +282,7 @@ class OppadramaProvider : MainAPI() {
                     continue
                 }
 
-                Log.i(TAG, "OPPA_FAST_HYDRAX_EMPTY = ${mirror.url}")
+                Log.i(TAG, "OPPA_FAST_HYDRAX_EMPTY_V26 = ${mirror.url}")
             }
 
             runCatching {

@@ -8,6 +8,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -25,12 +26,22 @@ import kotlin.coroutines.resume
 object AbyssWebViewProbe {
 
     private const val MAX_WAIT_MS = 26000L
+    private const val FINISH_AFTER_FIRST_STREAM_MS = 4500L
 
     data class AbyssStream(
         val label: String,
         val url: String,
         val headers: Map<String, String>
     )
+
+    private class Bridge(
+        private val onCapture: (String) -> Unit
+    ) {
+        @JavascriptInterface
+        fun capture(value: String?) {
+            onCapture(value.orEmpty())
+        }
+    }
 
     suspend fun extractFast(
         url: String,
@@ -43,24 +54,146 @@ object AbyssWebViewProbe {
             val handler = Handler(Looper.getMainLooper())
             val webView = WebView(context)
             val streams = linkedMapOf<String, AbyssStream>()
+            var finishScheduled = false
 
             fun safeDestroy() {
                 runCatching {
                     handler.removeCallbacksAndMessages(null)
                     webView.stopLoading()
                     webView.loadUrl("about:blank")
+                    webView.removeJavascriptInterface("oppaBridge")
                     webView.removeAllViews()
                     webView.destroy()
                 }
             }
 
+            fun sortedResult(): List<AbyssStream> {
+                return streams.values
+                    .distinctBy { it.url }
+                    .sortedWith(
+                        compareByDescending<AbyssStream> {
+                            qualityScore(it.label, it.url)
+                        }.thenBy { it.label }
+                    )
+            }
+
             fun finish() {
                 handler.post {
                     if (continuation.isActive) {
-                        val result = streams.values.toList()
-                        Log.i(TAG, "OPPA_FAST_FINISH = streams=${result.size}")
+                        val result = sortedResult()
+                        Log.i(
+                            TAG,
+                            "OPPA_FAST_FINISH = streams=${result.size} | " +
+                                result.joinToString { "${it.label}:${it.url.take(55)}" }
+                        )
                         safeDestroy()
                         continuation.resume(result)
+                    }
+                }
+            }
+
+            fun scheduleFinishSoon() {
+                if (finishScheduled) return
+                finishScheduled = true
+
+                handler.postDelayed({
+                    finish()
+                }, FINISH_AFTER_FIRST_STREAM_MS)
+            }
+
+            fun addStream(
+                label: String,
+                rawUrl: String?,
+                headers: Map<String, String>,
+                source: String
+            ) {
+                val fixedUrl = rawUrl
+                    ?.trim()
+                    ?.toAbsoluteStreamUrl()
+                    ?.takeIf { isStreamUrl(it) }
+                    ?: return
+
+                val fixedHeaders = headers
+                    .toMutableMap()
+                    .apply {
+                        put("User-Agent", get("User-Agent") ?: USER_AGENT)
+                        put("Accept", get("Accept") ?: "*/*")
+                        put("Referer", get("Referer") ?: url)
+                    }
+
+                val cleanLabel = label
+                    .trim()
+                    .ifBlank { guessLabel(fixedUrl) }
+
+                if (!streams.containsKey(fixedUrl)) {
+                    Log.i(
+                        TAG,
+                        "OPPA_FAST_ADD_STREAM = $source | $cleanLabel | $fixedUrl | " +
+                            fixedHeaders.keys.joinToString(",")
+                    )
+
+                    streams[fixedUrl] = AbyssStream(
+                        label = cleanLabel,
+                        url = fixedUrl,
+                        headers = fixedHeaders
+                    )
+                }
+
+                scheduleFinishSoon()
+            }
+
+            fun handleBridgeCapture(value: String) {
+                val clean = value.trim()
+                if (clean.isBlank()) return
+
+                if (clean.startsWith("OPPA_SOURCE|")) {
+                    val parts = clean.split("|", limit = 4)
+                    if (parts.size >= 4) {
+                        val label = parts[1]
+                        val file = parts[3]
+
+                        addStream(
+                            label = label,
+                            rawUrl = file,
+                            headers = mapOf(
+                                "User-Agent" to USER_AGENT,
+                                "Accept" to "*/*",
+                                "Referer" to url
+                            ),
+                            source = "bridge"
+                        )
+                    }
+                    return
+                }
+
+                if (clean.startsWith("OPPA_VIDEO|")) {
+                    val file = clean.removePrefix("OPPA_VIDEO|")
+                    addStream(
+                        label = guessLabel(file),
+                        rawUrl = file,
+                        headers = mapOf(
+                            "User-Agent" to USER_AGENT,
+                            "Accept" to "*/*",
+                            "Referer" to url
+                        ),
+                        source = "video"
+                    )
+                    return
+                }
+
+                if (clean.startsWith("OPPA_FETCH|") || clean.startsWith("OPPA_XHR|")) {
+                    val file = clean.substringAfter("|")
+                    if (isStreamUrl(file)) {
+                        addStream(
+                            label = guessLabel(file),
+                            rawUrl = file,
+                            headers = mapOf(
+                                "User-Agent" to USER_AGENT,
+                                "Accept" to "*/*",
+                                "Referer" to url
+                            ),
+                            source = "network-hook"
+                        )
                     }
                 }
             }
@@ -85,7 +218,6 @@ object AbyssWebViewProbe {
                 val requestUrl = request?.url?.toString()?.trim().orEmpty()
                 if (!isStreamUrl(requestUrl)) return
 
-                val fixedUrl = requestUrl.toAbsoluteStreamUrl()
                 val headers = request?.requestHeaders
                     .orEmpty()
                     .toMutableMap()
@@ -98,32 +230,34 @@ object AbyssWebViewProbe {
                     headers["Cookie"] = cookie
                 }
 
-                Log.i(
-                    TAG,
-                    "OPPA_FAST_CAPTURE_STREAM = $fixedUrl | " +
-                        headers.keys.joinToString(",")
+                addStream(
+                    label = guessLabel(requestUrl),
+                    rawUrl = requestUrl,
+                    headers = headers,
+                    source = "webview-request"
                 )
-
-                streams[fixedUrl] = AbyssStream(
-                    label = guessLabel(fixedUrl),
-                    url = fixedUrl,
-                    headers = headers
-                )
-
-                finish()
             }
 
             continuation.invokeOnCancellation {
                 safeDestroy()
             }
 
-            @SuppressLint("SetJavaScriptEnabled")
+            @SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
             fun setup() {
                 WebView.setWebContentsDebuggingEnabled(true)
 
                 val cookieManager = CookieManager.getInstance()
                 cookieManager.setAcceptCookie(true)
                 cookieManager.setAcceptThirdPartyCookies(webView, true)
+
+                webView.addJavascriptInterface(
+                    Bridge { value ->
+                        handler.post {
+                            handleBridgeCapture(value)
+                        }
+                    },
+                    "oppaBridge"
+                )
 
                 webView.layout(0, 0, 1080, 1080)
 
@@ -168,12 +302,15 @@ object AbyssWebViewProbe {
                                     pageUrl = requestUrl,
                                     referer = referer
                                 )
+                            }.onFailure {
+                                Log.e(TAG, "OPPA_FAST_INJECT_FAILED = ${it.message}", it)
                             }.getOrNull()
                         }
 
                         /*
-                         * Capture the short-lived /sora/ URL immediately and block WebView
-                         * from consuming it. Returning fast is the important part.
+                         * Capture stream requests and block WebView from spending the token.
+                         * We still wait a few seconds after first capture because the injected
+                         * JWPlayer hook may expose the other qualities.
                          */
                         if (isStreamUrl(requestUrl)) {
                             captureStream(request)
@@ -239,8 +376,9 @@ object AbyssWebViewProbe {
                 )
 
                 listOf(
-                    1800L,
-                    3200L,
+                    1200L,
+                    2400L,
+                    3600L,
                     5000L,
                     7200L,
                     9500L,
@@ -263,6 +401,7 @@ object AbyssWebViewProbe {
             runCatching {
                 setup()
             }.onFailure {
+                Log.e(TAG, "OPPA_FAST_SETUP_FAILED = ${it.message}", it)
                 finish()
             }
         }
@@ -303,10 +442,20 @@ object AbyssWebViewProbe {
             CookieManager.getInstance().flush()
         }
 
+        val injected = when {
+            html.contains("<head>", true) ->
+                html.replaceFirst(
+                    Regex("<head>", RegexOption.IGNORE_CASE),
+                    "<head>$HOOK_JS"
+                )
+
+            else -> "$HOOK_JS$html"
+        }
+
         return WebResourceResponse(
             "text/html",
             "UTF-8",
-            ByteArrayInputStream(html.toByteArray(Charsets.UTF_8))
+            ByteArrayInputStream(injected.toByteArray(Charsets.UTF_8))
         ).apply {
             responseHeaders = mapOf(
                 "Access-Control-Allow-Origin" to "*"
@@ -334,6 +483,23 @@ object AbyssWebViewProbe {
             value.contains("480") -> "480p"
             value.contains("360") -> "360p"
             else -> "Auto"
+        }
+    }
+
+    private fun qualityScore(
+        label: String,
+        url: String
+    ): Int {
+        val value = "${label.lowercase()} ${url.lowercase()}"
+
+        return when {
+            value.contains("2160") -> 2160
+            value.contains("1440") -> 1440
+            value.contains("1080") -> 1080
+            value.contains("720") || value.contains("/1421764806/") -> 720
+            value.contains("480") -> 480
+            value.contains("360") || value.contains("/677311756/") -> 360
+            else -> 0
         }
     }
 
@@ -369,6 +535,120 @@ object AbyssWebViewProbe {
     }
 
     private const val TAG = "OppaDrama"
+
+    private const val HOOK_JS = """
+<script>
+(function() {
+  if (window.__oppaHooked) return;
+  window.__oppaHooked = true;
+
+  function cap(value) {
+    try {
+      if (window.oppaBridge && window.oppaBridge.capture) {
+        window.oppaBridge.capture(String(value));
+      }
+    } catch(e) {}
+  }
+
+  function abs(url) {
+    if (!url) return "";
+    url = String(url);
+    if (url.indexOf("//") === 0) return "https:" + url;
+    return url;
+  }
+
+  function sendSources(list) {
+    try {
+      if (!list || !list.length) return;
+
+      for (var i = 0; i < list.length; i++) {
+        var source = list[i] || {};
+        var label = source.label || source.name || source.height || "Auto";
+        var type = source.type || "";
+        var file = source.file || source.url || "";
+
+        if (file) {
+          cap("OPPA_SOURCE|" + label + "|" + type + "|" + abs(file));
+        }
+      }
+    } catch(e) {}
+  }
+
+  function inspectPlayer() {
+    try {
+      if (typeof window.jwplayer === "function") {
+        var player = window.jwplayer();
+
+        if (player) {
+          if (player.getPlaylist) {
+            var playlist = player.getPlaylist() || [];
+
+            for (var i = 0; i < playlist.length; i++) {
+              var item = playlist[i] || {};
+              sendSources(item.sources);
+              sendSources(item.allSources);
+            }
+          }
+
+          if (player.getPlaylistItem) {
+            var current = player.getPlaylistItem() || {};
+            sendSources(current.sources);
+            sendSources(current.allSources);
+          }
+
+          if (player.getConfig) {
+            var config = player.getConfig() || {};
+            sendSources(config.sources);
+
+            if (config.playlist && config.playlist.length) {
+              for (var c = 0; c < config.playlist.length; c++) {
+                sendSources((config.playlist[c] || {}).sources);
+                sendSources((config.playlist[c] || {}).allSources);
+              }
+            }
+          }
+        }
+      }
+
+      var videos = document.querySelectorAll("video");
+      for (var v = 0; v < videos.length; v++) {
+        var src = videos[v].currentSrc || videos[v].src || "";
+        if (src) cap("OPPA_VIDEO|" + abs(src));
+      }
+    } catch(e) {
+      cap("OPPA_ERROR|" + e.message);
+    }
+  }
+
+  try {
+    var oldFetch = window.fetch;
+    if (oldFetch) {
+      window.fetch = function() {
+        try { cap("OPPA_FETCH|" + abs(arguments[0])); } catch(e) {}
+        return oldFetch.apply(this, arguments);
+      };
+    }
+  } catch(e) {}
+
+  try {
+    var oldOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(method, requestUrl) {
+      try { cap("OPPA_XHR|" + abs(requestUrl)); } catch(e) {}
+      return oldOpen.apply(this, arguments);
+    };
+  } catch(e) {}
+
+  cap("OPPA_HOOK_READY|" + location.href);
+
+  inspectPlayer();
+  setTimeout(inspectPlayer, 300);
+  setTimeout(inspectPlayer, 700);
+  setTimeout(inspectPlayer, 1200);
+  setTimeout(inspectPlayer, 2000);
+  setInterval(inspectPlayer, 1000);
+})();
+</script>
+    """
 
     private const val USER_AGENT =
         "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 Chrome/139.0 Mobile Safari/537.36"
