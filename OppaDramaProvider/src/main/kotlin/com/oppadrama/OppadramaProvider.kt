@@ -171,100 +171,110 @@ private val headers = mapOf(
         }
 }
     override suspend fun load(url: String): LoadResponse {
-        resolveDomain()
 
-        val document = app.get(url, headers = headers).document
+    val document = app.get(
+        url,
+        headers = headers
+    ).document
 
-        val title = document
-            .selectFirst("h1.entry-title, h1")
-            ?.text()
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
-            ?: throw ErrorLoadingException("OppaDrama title not found")
+    val title = document
+        .selectFirst("h1.entry-title")
+        ?.text()
+        ?.trim()
+        ?: throw ErrorLoadingException("Title not found")
 
-        val poster = document
-            .selectFirst("div.bigcontent img, .thumb img, .poster img")
-            ?.getImageUrl()
-            ?.let(::fixUrlNull)
+    val poster = document
+        .selectFirst(".thumb img,.bigcontent img,.poster img")
+        ?.attr("src")
+        ?.let(::fixUrl)
 
-        val description = document
-            .select("div.entry-content p")
-            .map { it.text().trim() }
-            .filter { it.isNotBlank() }
-            .joinToString("\n")
-            .takeIf { it.isNotBlank() }
+    val description = document
+        .selectFirst(".entry-content p")
+        ?.text()
 
-        val typeText = document.infoValue("Tipe", "Type").orEmpty()
-        val status = parseStatus(document.infoValue("Status"))
-        val year = parseYear(
-            document.infoValue("Dirilis", "Released", "Tahun", "Year")
-                ?: document.selectFirst(".year")?.text()
-        )
-        val duration = parseDuration(
-            document.infoValue("Durasi", "Duration")
-        )
+    val tags = document
+        .select(".genxed a")
+        .map { it.text() }
 
-        val tags = document
-            .select("div.genxed a, .genxed a")
-            .map { it.text().trim() }
-            .filter { it.isNotBlank() }
+    val year = document
+        .selectFirst(".spe span:contains(Tahun)")
+        ?.text()
+        ?.filter(Char::isDigit)
+        ?.toIntOrNull()
 
-        val actors = document
-            .select(
-                "span:has(b:matchesOwn(Artis:)) a, " +
-                    "span:has(b:matchesOwn(Cast:)) a, " +
-                    ".spe span:has(b:matchesOwn(Artis:)) a"
-            )
-            .map { it.text().trim() }
-            .filter { it.isNotBlank() }
+    val status = when {
 
-        val rating = document
-            .selectFirst("div.rating strong, .rating strong")
-            ?.text()
-            ?.let {
-                Regex("""\d+(?:\.\d+)?""")
-                    .find(it)
-                    ?.value
-                    ?.toDoubleOrNull()
-            }
+        document.text().contains(
+            "Completed",
+            true
+        ) -> ShowStatus.Completed
 
-        val trailer = document
-            .selectFirst("div.bixbox.trailer iframe, .trailer iframe")
-            ?.getIframeUrl()
-            ?.let { it.toAbsoluteUrl(url) }
+        else -> ShowStatus.Ongoing
+    }
 
-        val recommendations = document
-            .select("div.listupd article.bs, .listupd .bs")
-            .mapNotNull { it.toSearchResult() }
+    val episodes = document
+        .select("div.eplister li a")
+        .reversed()
+        .mapIndexed { index, element ->
 
-        val episodes = document
-            .select("div.eplister ul li a[href], .eplister ul li a[href]")
-            .asReversed()
-            .mapIndexed { index, anchor ->
-                val episodeText = anchor
-                    .selectFirst(".epl-num, .epl-title")
+            val epUrl =
+                fixUrl(element.attr("href"))
+
+            val epName =
+                element.selectFirst(".epl-title")
                     ?.text()
                     ?.trim()
-                    .orEmpty()
 
-                val episodeNumber = Regex("""\d+""")
-                    .find(episodeText)
-                    ?.value
+            val epNum =
+                element.selectFirst(".epl-num")
+                    ?.text()
+                    ?.filter(Char::isDigit)
                     ?.toIntOrNull()
                     ?: index + 1
 
-                val episodeName = anchor
-                    .selectFirst(".epl-title")
-                    ?.text()
-                    ?.trim()
-                    ?.takeIf { it.isNotBlank() }
-                    ?: "Episode $episodeNumber"
+            Episode(
+                epUrl
+            ).apply {
 
-                newEpisode(fixUrl(anchor.attr("href"))) {
-                    name = episodeName
-                    episode = episodeNumber
-                }
+                name = epName
+
+                episode = epNum
             }
+        }
+
+    val recommendations =
+        document
+            .select(".listupd article.bs")
+            .mapNotNull {
+                it.toSearchResult()
+            }
+
+    return newTvSeriesLoadResponse(
+
+        title,
+
+        url,
+
+        TvType.AsianDrama,
+
+        episodes
+
+    ) {
+
+        posterUrl = poster
+
+        plot = description
+
+        this.year = year
+
+        this.tags = tags
+
+        showStatus = status
+
+        this.recommendations =
+            recommendations
+    }
+}
 
         val isMovie = typeText.contains("movie", true) ||
             url.contains("/movie/", true)
