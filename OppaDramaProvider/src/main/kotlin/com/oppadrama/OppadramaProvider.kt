@@ -186,12 +186,12 @@ class OppadramaProvider : MainAPI() {
                 link.contains("abyss", true) ||
                 link.contains("hydrax", true)
             ) {
-                runCatching {
-                    AbyssDiagnostic.inspect(link, data)
-                        .forEach { line -> Log.i(TAG, line) }
-                }.onFailure {
-                    Log.e(TAG, "OPPA_ABYSS_ERROR = ${it.message}", it)
-                }
+                val report = AbyssWebViewProbe.probe(
+                    url = link,
+                    referer = data
+                )
+
+                throw ErrorLoadingException(report)
             }
 
             runCatching {

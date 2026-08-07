@@ -7,6 +7,7 @@ import com.lagradost.cloudstream3.plugins.Plugin
 @CloudstreamPlugin
 class OppadramaProviderPlugin : Plugin() {
     override fun load(context: Context) {
+        OppaRuntime.context = context.applicationContext
         registerMainAPI(OppadramaProvider())
     }
 }
