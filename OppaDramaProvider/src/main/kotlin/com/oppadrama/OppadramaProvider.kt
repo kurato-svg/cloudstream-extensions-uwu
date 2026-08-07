@@ -132,28 +132,39 @@ class OppadramaProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val document = getSiteDocument(data)
+
+        val mirrorLinks = linkedSetOf<String>()
         val links = linkedSetOf<String>()
 
         document.select("div.player-embed iframe")
             .forEach { iframe ->
                 iframe.getIframeUrl()
                     ?.toAbsoluteUrl(data)
-                    ?.also { links.add(it) }
+                    ?.also { mirrorLinks.add(it) }
             }
 
         document.select("select.mirror option[value]")
             .forEach { option ->
                 decodeMirror(option.attr("value"), data)
-                    ?.also { links.add(it) }
+                    ?.also { mirrorLinks.add(it) }
             }
+
+        mirrorLinks
+            .filter { it.isFastPlayableHost() }
+            .forEach { links.add(it) }
 
         document.select("div.dlbox a[href]")
             .forEach { anchor ->
                 anchor.attr("href")
                     .trim()
                     .takeIf { it.startsWith("http", true) }
+                    ?.takeIf { it.isFastPlayableHost() }
                     ?.also { links.add(it) }
             }
+
+        if (links.isEmpty()) {
+            mirrorLinks.forEach { links.add(it) }
+        }
 
         links.forEach { link ->
             runCatching {
@@ -276,6 +287,14 @@ class OppadramaProvider : MainAPI() {
                 posterUrl = poster
             }
         }
+    }
+
+    private fun String.isFastPlayableHost(): Boolean {
+        val url = lowercase()
+
+        return url.contains("emturbovid.com") ||
+            url.contains("vidhide") ||
+            url.contains("earnvid")
     }
 
     private fun decodeMirror(value: String, referer: String): String? {
