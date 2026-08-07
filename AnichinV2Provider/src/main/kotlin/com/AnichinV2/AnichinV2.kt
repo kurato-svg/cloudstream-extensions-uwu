@@ -186,11 +186,8 @@ class AnichinV2 : MainAPI() {
                     .trim()
 
                 newEpisode(episodeUrl) {
-                    name = "- $cleanTitle $episodeSub Indonesia".trim()
-                    posterUrl = episodePoster
-                    description = episodeDate
-                        .takeIf { it.isNotBlank() }
-                        ?.let { "Rilis: $it" }
+    name = "- $cleanTitle $episodeSub Indonesia".trim()
+    posterUrl = episodePoster
                 }
             }
             .reversed()
