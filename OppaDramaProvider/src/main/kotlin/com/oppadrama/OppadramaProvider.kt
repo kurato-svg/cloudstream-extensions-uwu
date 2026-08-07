@@ -2,7 +2,6 @@ package com.oppadrama
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URI
@@ -156,10 +155,24 @@ class OppadramaProvider : MainAPI() {
                     ?.also { links.add(it) }
             }
 
+        document.select("div.player-embed")
+            .forEach { embed ->
+                OppadramaMirrorExtractor.decodeRaw(
+                    embed.html(),
+                    "Main",
+                    data,
+                    mainUrl
+                ).forEach { links.add(it) }
+            }
+
         document.select("select.mirror option[value]")
             .forEach { option ->
-                decodeMirror(option.attr("value"), data)
-                    ?.also { links.add(it) }
+                OppadramaMirrorExtractor.decodeMirror(
+                    value = option.attr("value"),
+                    label = option.text(),
+                    referer = data,
+                    mainUrl = mainUrl
+                ).forEach { links.add(it) }
             }
 
         document.select("div.dlbox a[href]")
@@ -170,11 +183,7 @@ class OppadramaProvider : MainAPI() {
                     ?.also { links.add(it) }
             }
 
-        val orderedLinks = links
-            .sortedWith(
-                compareBy<String> { it.hostPriority() }
-                    .thenBy { it }
-            )
+        val orderedLinks = OppadramaMirrorExtractor.sortLinks(links)
 
         orderedLinks.forEach { link ->
             runCatching {
@@ -348,43 +357,6 @@ class OppadramaProvider : MainAPI() {
         }
     }
 
-    private fun decodeMirror(value: String, referer: String): String? {
-        val cleaned = value.trim()
-        if (cleaned.isBlank()) return null
-
-        if (
-            cleaned.startsWith("http", true) ||
-            cleaned.startsWith("//") ||
-            cleaned.startsWith("/")
-        ) {
-            return cleaned.toAbsoluteUrl(referer)
-        }
-
-        return runCatching {
-            val html = base64Decode(cleaned.replace("\\s".toRegex(), ""))
-            Jsoup.parse(html)
-                .selectFirst("iframe")
-                ?.getIframeUrl()
-                ?.toAbsoluteUrl(referer)
-        }.getOrNull()
-    }
-
-    private fun String.hostPriority(): Int {
-        val url = lowercase()
-
-        return when {
-            url.contains("emturbovid.com") -> 0
-            url.contains("vidhide") -> 1
-            url.contains("earnvid") -> 2
-            url.contains("abyssplayer") -> 3
-            url.contains("hydrax") -> 3
-            url.contains("minochinos") -> 4
-            url.contains("filelions") -> 4
-            url.contains("buzzheavier") -> 5
-            url.contains("filekeeper") -> 6
-            else -> 10
-        }
-    }
 
     private fun Element.getImageUrl(): String? {
         return when {
