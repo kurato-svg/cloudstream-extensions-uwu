@@ -25,49 +25,22 @@ object AbyssWebViewProbe {
 
     private const val MAX_WAIT_MS = 18000L
 
-    suspend fun probe(
+    data class AbyssStream(
+        val label: String,
+        val url: String
+    )
+
+    suspend fun extract(
         url: String,
         referer: String
-    ): String = withContext(Dispatchers.Main) {
+    ): List<AbyssStream> = withContext(Dispatchers.Main) {
         val context = OppaRuntime.context
-            ?: return@withContext debugText(
-                url = url,
-                stage = "Context missing",
-                checks = listOf(
-                    Pair(false, "Plugin context available")
-                ),
-                requests = emptyList(),
-                captures = emptyList(),
-                jsResult = "OppaRuntime.context is null"
-            )
+            ?: return@withContext emptyList()
 
         suspendCancellableCoroutine { continuation ->
-            val requests = Collections.synchronizedList(mutableListOf<String>())
             val captures = Collections.synchronizedList(mutableListOf<String>())
             val handler = Handler(Looper.getMainLooper())
             val webView = WebView(context)
-
-            fun addRequest(requestUrl: String?) {
-                val value = requestUrl?.trim().orEmpty()
-                if (value.isBlank()) return
-
-                val lower = value.lowercase()
-                val wanted = lower.contains("abyss") ||
-                    lower.contains("iamcdn") ||
-                    lower.contains("jwplayer") ||
-                    lower.contains("sssrr") ||
-                    lower.contains("sora") ||
-                    lower.contains(".m3u8") ||
-                    lower.contains(".mp4") ||
-                    lower.contains("playlist") ||
-                    lower.contains("stream") ||
-                    lower.contains("media") ||
-                    lower.contains("blob:")
-
-                if (wanted && !requests.contains(value)) {
-                    requests.add(value)
-                }
-            }
 
             fun addCapture(value: String?) {
                 val clean = value?.trim().orEmpty()
@@ -108,7 +81,7 @@ object AbyssWebViewProbe {
                 }
             }
 
-            fun finish(stage: String, jsResult: String) {
+            fun finish(jsResult: String?) {
                 runCatching {
                     handler.removeCallbacksAndMessages(null)
                     webView.stopLoading()
@@ -118,72 +91,11 @@ object AbyssWebViewProbe {
                 }
 
                 if (continuation.isActive) {
-                    val requestSnapshot = synchronized(requests) { requests.toList() }
-                    val captureSnapshot = synchronized(captures) { captures.toList() }
+                    extractCaptures(jsResult)
+                        .forEach { addCapture(it) }
 
-                    val allText = (requestSnapshot + captureSnapshot + listOf(jsResult))
-                        .joinToString("\n")
-
-                    val checks: List<Pair<Boolean, String>> = listOf(
-                        Pair(true, "Plugin context available"),
-                        Pair(
-                            requestSnapshot.any { it.contains("abyssplayer.com/?v=", true) },
-                            "Original Abyss iframe requested"
-                        ),
-                        Pair(
-                            !requestSnapshot.any { it.equals("https://abyss.to/", true) },
-                            "Not forced to abyss.to landing page"
-                        ),
-                        Pair(
-                            requestSnapshot.any { it.contains("iamcdn", true) },
-                            "iamcdn assets loaded"
-                        ),
-                        Pair(
-                            requestSnapshot.any { it.contains("jwplayer", true) },
-                            "JWPlayer assets requested"
-                        ),
-                        Pair(
-                            captureSnapshot.any { it.contains("OPPA_HOOK_READY", true) },
-                            "Hook injected inside Abyss iframe"
-                        ),
-                        Pair(
-                            captureSnapshot.any { it.contains("fetch", true) },
-                            "fetch hook captured"
-                        ),
-                        Pair(
-                            captureSnapshot.any { it.contains("xhr", true) },
-                            "XHR hook captured"
-                        ),
-                        Pair(
-                            allText.contains(".m3u8", true),
-                            "m3u8 seen"
-                        ),
-                        Pair(
-                            allText.contains(".mp4", true),
-                            "mp4 seen"
-                        ),
-                        Pair(
-                            allText.contains("sora", true) ||
-                                allText.contains("sssrr", true),
-                            "Abyss segment/domain seen"
-                        ),
-                        Pair(
-                            allText.contains("blob:", true) ||
-                                captureSnapshot.any { it.contains("createObjectURL", true) },
-                            "Blob or MSE activity seen"
-                        )
-                    )
-
-                    continuation.resume(
-                        debugText(
-                            url = url,
-                            stage = stage,
-                            checks = checks,
-                            requests = requestSnapshot,
-                            captures = captureSnapshot,
-                            jsResult = jsResult
-                        )
-                    )
+                    val snapshot = synchronized(captures) { captures.toList() }
+                    continuation.resume(parseStreams(snapshot))
                 }
             }
 
@@ -207,8 +119,7 @@ object AbyssWebViewProbe {
                 webView.settings.javaScriptCanOpenWindowsAutomatically = true
                 webView.settings.setSupportMultipleWindows(false)
                 webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                webView.settings.userAgentString =
-                    "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 Chrome/139.0 Mobile Safari/537.36"
+                webView.settings.userAgentString = USER_AGENT
 
                 webView.webChromeClient = WebChromeClient()
 
@@ -217,23 +128,18 @@ object AbyssWebViewProbe {
                         view: WebView?,
                         requestUrl: String?,
                         favicon: Bitmap?
-                    ) {
-                        addRequest(requestUrl)
-                    }
+                    ) = Unit
 
                     override fun onPageFinished(
                         view: WebView?,
                         requestUrl: String?
-                    ) {
-                        addRequest(requestUrl)
-                    }
+                    ) = Unit
 
                     override fun shouldInterceptRequest(
                         view: WebView?,
                         request: WebResourceRequest?
                     ): WebResourceResponse? {
                         val requestUrl = request?.url?.toString()
-                        addRequest(requestUrl)
 
                         if (
                             requestUrl?.contains("abyssplayer.com/?v=", true) == true
@@ -253,19 +159,12 @@ object AbyssWebViewProbe {
                     override fun shouldOverrideUrlLoading(
                         view: WebView?,
                         requestUrl: String?
-                    ): Boolean {
-                        addRequest(requestUrl)
-                        return shouldBlockNavigation(requestUrl)
-                    }
+                    ): Boolean = shouldBlockNavigation(requestUrl)
 
                     override fun shouldOverrideUrlLoading(
                         view: WebView?,
                         request: WebResourceRequest?
-                    ): Boolean {
-                        val requestUrl = request?.url?.toString()
-                        addRequest(requestUrl)
-                        return shouldBlockNavigation(requestUrl)
-                    }
+                    ): Boolean = shouldBlockNavigation(request?.url?.toString())
                 }
 
                 val escapedUrl = url
@@ -283,6 +182,7 @@ object AbyssWebViewProbe {
                                 try {
                                     var data = event.data;
                                     if (!data) return;
+
                                     if (typeof data === "string") {
                                         if (data.indexOf("OPPA_") >= 0) {
                                             window.__oppaCaptures.push(data);
@@ -316,8 +216,6 @@ object AbyssWebViewProbe {
                     </html>
                 """.trimIndent()
 
-                addRequest(url)
-
                 webView.loadDataWithBaseURL(
                     referer,
                     wrapper,
@@ -334,19 +232,10 @@ object AbyssWebViewProbe {
                 handler.postDelayed({
                     runCatching {
                         webView.evaluateJavascript(PROBE_JS) { result ->
-                            val capturesFromTop = extractCaptures(result)
-                            capturesFromTop.forEach { addCapture(it) }
-
-                            finish(
-                                stage = "Hook probe completed",
-                                jsResult = result ?: "null"
-                            )
+                            finish(result)
                         }
                     }.onFailure {
-                        finish(
-                            stage = "Hook probe failed",
-                            jsResult = it.message ?: it.toString()
-                        )
+                        finish(null)
                     }
                 }, MAX_WAIT_MS)
             }
@@ -354,10 +243,7 @@ object AbyssWebViewProbe {
             runCatching {
                 setup()
             }.onFailure {
-                finish(
-                    stage = "WebView setup failed",
-                    jsResult = it.message ?: it.toString()
-                )
+                finish(null)
             }
         }
     }
@@ -370,12 +256,12 @@ object AbyssWebViewProbe {
 
         connection.requestMethod = "GET"
         connection.instanceFollowRedirects = true
-        connection.setRequestProperty(
-            "User-Agent",
-            "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 Chrome/139.0 Mobile Safari/537.36"
-        )
+        connection.setRequestProperty("User-Agent", USER_AGENT)
         connection.setRequestProperty("Referer", referer)
-        connection.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        connection.setRequestProperty(
+            "Accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        )
         connection.setRequestProperty("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8")
         connection.setRequestProperty("Accept-Encoding", "identity")
         connection.connectTimeout = 10000
@@ -402,6 +288,60 @@ object AbyssWebViewProbe {
                 "Access-Control-Allow-Origin" to "*"
             )
         }
+    }
+
+    private fun parseStreams(captures: List<String>): List<AbyssStream> {
+        val results = linkedMapOf<String, AbyssStream>()
+
+        captures.forEach { line ->
+            if (!line.contains("OPPA_SOURCE", true)) return@forEach
+
+            val payload = line.substringAfter("=", "").trim()
+            val parts = payload.split("|").map { it.trim() }
+
+            val label = parts.getOrNull(0)
+                ?.takeIf { it.isNotBlank() }
+                ?: "Unknown"
+
+            val file = parts.getOrNull(2)
+                ?.takeIf { it.isNotBlank() }
+                ?: return@forEach
+
+            results[file] = AbyssStream(
+                label = label,
+                url = file
+            )
+        }
+
+        if (results.isNotEmpty()) {
+            return results.values.toList()
+        }
+
+        /*
+         * Fallback: parse older OPPA_JWPLAYER_PLAYLIST captures.
+         */
+        captures.forEach { line ->
+            Regex(
+                """"label"\s*:\s*"([^"]+)".*?"file"\s*:\s*"([^"]+)"""",
+                setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+            ).findAll(line)
+                .forEach { match ->
+                    val label = match.groupValues.getOrNull(1)?.trim()
+                        ?.takeIf { it.isNotBlank() }
+                        ?: "Unknown"
+
+                    val file = match.groupValues.getOrNull(2)?.trim()
+                        ?.takeIf { it.isNotBlank() }
+                        ?: return@forEach
+
+                    results[file] = AbyssStream(
+                        label = label,
+                        url = file
+                    )
+                }
+        }
+
+        return results.values.toList()
     }
 
     private fun extractCaptures(jsResult: String?): List<String> {
@@ -433,87 +373,12 @@ object AbyssWebViewProbe {
         return !allowed
     }
 
-    private fun debugText(
-        url: String,
-        stage: String,
-        checks: List<Pair<Boolean, String>>,
-        requests: List<String>,
-        captures: List<String>,
-        jsResult: String
-    ): String {
-        val checkText = checks.joinToString("\n") { pair ->
-            "[${if (pair.first) "✓" else "✗"}] ${pair.second}"
-        }
-
-        val requestText = requests
-            .take(25)
-            .joinToString("\n") { it.take(180) }
-            .ifBlank { "No matched request captured" }
-
-        val captureText = captures
-            .take(30)
-            .joinToString("\n") { it.take(220) }
-            .ifBlank { "No hook capture received" }
-
-        val cleanJs = jsResult
-            .replace("\\n", " ")
-            .replace("\\\"", "\"")
-            .take(2200)
-
-        return """
-========== OPPA HOOK DEBUG ==========
-
-Hydrax URL:
-$url
-
-Stage:
-$stage
-
-Checks:
-$checkText
-
-Captured Requests:
-$requestText
-
-Hook Captures:
-$captureText
-
-Top Frame JS Result:
-$cleanJs
-
-=====================================
-        """.trimIndent()
-    }
-
     private const val PROBE_JS = """
 (function() {
-  function safe(name, fn) {
-    try {
-      return fn();
-    } catch (e) {
-      return "ERR " + name + ": " + e.message;
-    }
-  }
-
-  var result = {};
-  result.href = location.href;
-  result.title = document.title;
-  result.readyState = document.readyState;
-  result.iframeCount = document.querySelectorAll("iframe").length;
-  result.iframeSrcs = Array.prototype.slice.call(document.querySelectorAll("iframe")).map(function(f) {
-    return f.src || "";
+  return JSON.stringify({
+    href: location.href,
+    captures: window.__oppaCaptures || []
   });
-  result.captures = window.__oppaCaptures || [];
-  result.bodyText = (document.body ? document.body.innerText : "").slice(0, 600);
-  result.bodyHtmlHints = safe("htmlHints", function() {
-    var html = document.documentElement.innerHTML;
-    var urls = html.match(/https?:\/\/[^"'<>\\s]+/g) || [];
-    return urls.filter(function(u) {
-      return /m3u8|mp4|sora|sssrr|abyss|iamcdn|jwplayer/i.test(u);
-    }).slice(0, 40);
-  });
-
-  return JSON.stringify(result);
 })()
     """
 
@@ -525,6 +390,25 @@ $cleanJs
       var text = "OPPA_" + type + " = " + value;
       window.parent.postMessage(text, "*");
     } catch(e) {}
+  }
+
+  function sendSources(prefix, list) {
+    try {
+      if (!list) return;
+
+      for (var i = 0; i < list.length; i++) {
+        var source = list[i] || {};
+        var label = source.label || source.name || "Unknown";
+        var type = source.type || "";
+        var file = source.file || source.url || "";
+
+        if (file) {
+          post("SOURCE", label + " | " + type + " | " + file);
+        }
+      }
+    } catch(e) {
+      post(prefix + "_SOURCE_ERROR", e.message);
+    }
   }
 
   post("HOOK_READY", location.href);
@@ -546,8 +430,8 @@ $cleanJs
 
   try {
     var originalOpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function(method, url) {
-      try { this.__oppaUrl = url; post("XHR_OPEN", method + " " + url); } catch(e) {}
+    XMLHttpRequest.prototype.open = function(method, requestUrl) {
+      try { this.__oppaUrl = requestUrl; post("XHR_OPEN", method + " " + requestUrl); } catch(e) {}
       return originalOpen.apply(this, arguments);
     };
 
@@ -608,25 +492,45 @@ $cleanJs
       try {
         if (typeof window.jwplayer === "function") {
           var player = window.jwplayer();
-          post("JWPLAYER_STATE", player && player.getState ? player.getState() : "no-state");
+
+          if (player && player.getState) {
+            post("JWPLAYER_STATE", player.getState());
+          }
 
           if (player && player.getPlaylist) {
-            post("JWPLAYER_PLAYLIST", JSON.stringify(player.getPlaylist()).slice(0, 1000));
+            var playlist = player.getPlaylist() || [];
+            post("JWPLAYER_PLAYLIST_SIZE", playlist.length);
+
+            for (var i = 0; i < playlist.length; i++) {
+              var item = playlist[i] || {};
+              sendSources("PLAYLIST_SOURCES", item.sources);
+              sendSources("PLAYLIST_ALLSOURCES", item.allSources);
+            }
+          }
+
+          if (player && player.getPlaylistItem) {
+            var currentItem = player.getPlaylistItem() || {};
+            sendSources("CURRENT_SOURCES", currentItem.sources);
+            sendSources("CURRENT_ALLSOURCES", currentItem.allSources);
           }
         }
 
         var videos = document.querySelectorAll("video");
-        for (var i = 0; i < videos.length; i++) {
-          post("VIDEO_SRC", (videos[i].currentSrc || videos[i].src || "no-src"));
+        for (var v = 0; v < videos.length; v++) {
+          var src = videos[v].currentSrc || videos[v].src || "";
+          if (src) post("VIDEO_SRC", src);
         }
       } catch(e) {}
     }, 1000);
 
-    setTimeout(function() { clearInterval(timer); }, 16000);
+    setTimeout(function() { clearInterval(timer); }, 17000);
   } catch(e) {
     post("TIMER_HOOK_ERROR", e.message);
   }
 })();
 </script>
     """
+
+    private const val USER_AGENT =
+        "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 Chrome/139.0 Mobile Safari/537.36"
 }

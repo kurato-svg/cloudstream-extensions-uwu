@@ -26,7 +26,7 @@ class OppadramaProvider : MainAPI() {
     private var checkedAddress = false
 
     private val headers = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/139.0 Safari/537.36",
+        "User-Agent" to USER_AGENT,
         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language" to "id-ID,id;q=0.9,en-US;q=0.8",
         "Referer" to "$mainUrl/",
@@ -181,17 +181,46 @@ class OppadramaProvider : MainAPI() {
             Log.i(TAG, "OPPA_SORTED = $it")
         }
 
-        sortedLinks.forEach { link ->
+        for (link in sortedLinks) {
             if (
                 link.contains("abyss", true) ||
                 link.contains("hydrax", true)
             ) {
-                val report = AbyssWebViewProbe.probe(
-                    url = link,
-                    referer = data
-                )
+                val streams = runCatching {
+                    AbyssWebViewProbe.extract(
+                        url = link,
+                        referer = data
+                    )
+                }.onFailure {
+                    Log.e(TAG, "OPPA_ABYSS_EXTRACT_FAILED = ${it.message}", it)
+                }.getOrDefault(emptyList())
 
-                throw ErrorLoadingException(report)
+                streams.forEach { stream ->
+                    val fixedUrl = stream.url.toAbsoluteStreamUrl()
+
+                    Log.i(TAG, "OPPA_ABYSS_LINK = ${stream.label} | $fixedUrl")
+
+                    callback(
+                        ExtractorLink(
+                            source = "Abyss",
+                            name = "Abyss ${stream.label}",
+                            url = fixedUrl,
+                            referer = link,
+                            quality = getQualityFromName(stream.label),
+                            isM3u8 = fixedUrl.contains(".m3u8", true),
+                            headers = mapOf(
+                                "Referer" to link,
+                                "Origin" to "https://abyssplayer.com",
+                                "User-Agent" to USER_AGENT,
+                                "Accept" to "*/*"
+                            )
+                        )
+                    )
+                }
+
+                if (streams.isNotEmpty()) {
+                    return true
+                }
             }
 
             runCatching {
@@ -509,6 +538,18 @@ class OppadramaProvider : MainAPI() {
         )
     }
 
+
+    private fun String.toAbsoluteStreamUrl(): String {
+        val value = trim()
+
+        return when {
+            value.startsWith("//") -> "https:$value"
+            value.startsWith("http", true) -> value
+            value.startsWith("/") -> "https://abyssplayer.com$value"
+            else -> value
+        }
+    }
+
     private fun String.priorityScore(): Int {
         val value = lowercase()
 
@@ -665,5 +706,7 @@ class OppadramaProvider : MainAPI() {
 
     companion object {
         private const val TAG = "OppaDrama"
+        private const val USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 Chrome/139.0 Mobile Safari/537.36"
     }
 }
