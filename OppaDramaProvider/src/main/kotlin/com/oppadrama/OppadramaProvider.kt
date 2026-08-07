@@ -2,6 +2,7 @@ package com.oppadrama
 
 import android.util.Log
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.ErrorLoadingException
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
@@ -239,6 +240,19 @@ class OppadramaProvider : MainAPI() {
         }
 
         sortedServers.forEach { mirror ->
+            if (
+                mirror.url.contains("abyssplayer", true) ||
+                mirror.url.contains("abyss.to", true) ||
+                mirror.url.contains("hydrax", true)
+            ) {
+                val report = AbyssWebViewProbe.debug(
+                    url = mirror.url,
+                    referer = data
+                )
+
+                throw ErrorLoadingException(report)
+            }
+
             runCatching {
                 Log.i(TAG, "OPPA_TRY_EXTRACTOR = ${mirror.label} | ${mirror.url}")
 
