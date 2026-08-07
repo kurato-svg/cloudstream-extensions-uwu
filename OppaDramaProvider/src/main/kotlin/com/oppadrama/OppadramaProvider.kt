@@ -261,7 +261,7 @@ class OppadramaProvider : MainAPI() {
 
                     Log.i(
                         TAG,
-                        "OPPA_FAST_HYDRAX_LINK = ${stream.label} | ${stream.url} | " +
+                        "OPPA_HYDRAX_LINK = ${stream.label} | ${stream.url} | " +
                             streamHeaders.keys.joinToString(",")
                     )
 
@@ -279,10 +279,10 @@ class OppadramaProvider : MainAPI() {
                 }
 
                 if (streams.isNotEmpty()) {
-                    continue
+                    return true
                 }
 
-                Log.i(TAG, "OPPA_FAST_HYDRAX_EMPTY_V26 = ${mirror.url}")
+                Log.i(TAG, "OPPA_HYDRAX_EMPTY = ${mirror.url}")
             }
 
             runCatching {

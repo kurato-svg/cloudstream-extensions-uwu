@@ -26,7 +26,7 @@ import kotlin.coroutines.resume
 object AbyssWebViewProbe {
 
     private const val MAX_WAIT_MS = 26000L
-    private const val FINISH_AFTER_FIRST_STREAM_MS = 4500L
+    private const val FINISH_AFTER_FIRST_STREAM_MS = 2500L
 
     data class AbyssStream(
         val label: String,
@@ -83,7 +83,7 @@ object AbyssWebViewProbe {
                         val result = sortedResult()
                         Log.i(
                             TAG,
-                            "OPPA_FAST_FINISH = streams=${result.size} | " +
+                            "OPPA_HYDRAX_FINISH = streams=${result.size} | " +
                                 result.joinToString { "${it.label}:${it.url.take(55)}" }
                         )
                         safeDestroy()
@@ -128,7 +128,7 @@ object AbyssWebViewProbe {
                 if (!streams.containsKey(fixedUrl)) {
                     Log.i(
                         TAG,
-                        "OPPA_FAST_ADD_STREAM = $source | $cleanLabel | $fixedUrl | " +
+                        "OPPA_HYDRAX_ADD_STREAM = $source | $cleanLabel | $fixedUrl | " +
                             fixedHeaders.keys.joinToString(",")
                     )
 
@@ -290,10 +290,6 @@ object AbyssWebViewProbe {
                     ): WebResourceResponse? {
                         val requestUrl = request?.url?.toString()
 
-                        if (isUsefulDebugUrl(requestUrl)) {
-                            Log.i(TAG, "OPPA_FAST_WEBVIEW_REQUEST = $requestUrl")
-                        }
-
                         if (
                             requestUrl?.contains("abyssplayer.com/?v=", true) == true
                         ) {
@@ -303,7 +299,7 @@ object AbyssWebViewProbe {
                                     referer = referer
                                 )
                             }.onFailure {
-                                Log.e(TAG, "OPPA_FAST_INJECT_FAILED = ${it.message}", it)
+                                Log.e(TAG, "OPPA_HYDRAX_INJECT_FAILED = ${it.message}", it)
                             }.getOrNull()
                         }
 
@@ -388,7 +384,6 @@ object AbyssWebViewProbe {
                     21500L
                 ).forEach { delay ->
                     handler.postDelayed({
-                        Log.i(TAG, "OPPA_FAST_CLICK = $delay")
                         clickWebView()
                     }, delay)
                 }
@@ -401,7 +396,7 @@ object AbyssWebViewProbe {
             runCatching {
                 setup()
             }.onFailure {
-                Log.e(TAG, "OPPA_FAST_SETUP_FAILED = ${it.message}", it)
+                Log.e(TAG, "OPPA_HYDRAX_SETUP_FAILED = ${it.message}", it)
                 finish()
             }
         }
@@ -520,18 +515,6 @@ object AbyssWebViewProbe {
             .replace("\"", "&quot;")
             .replace("<", "&lt;")
             .replace(">", "&gt;")
-    }
-
-    private fun isUsefulDebugUrl(requestUrl: String?): Boolean {
-        val value = requestUrl?.lowercase().orEmpty()
-
-        return value.contains("abyss") ||
-            value.contains("iamcdn") ||
-            value.contains("jwplayer") ||
-            value.contains("sssrr") ||
-            value.contains("/sora/") ||
-            value.contains(".m3u8") ||
-            value.contains(".mp4")
     }
 
     private const val TAG = "OppaDrama"
