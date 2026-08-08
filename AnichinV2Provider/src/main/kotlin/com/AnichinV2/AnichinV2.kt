@@ -3,7 +3,6 @@ package com.AnichinV2
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.Jsoup
-import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
 
@@ -279,65 +278,6 @@ class AnichinV2 : MainAPI() {
         }
     }
 
-    private fun cleanFoundUrl(value: String): String? {
-        val cleaned = value
-            .trim()
-            .replace("\\/", "/")
-            .replace("\\u0026", "&")
-            .replace("\\u003d", "=")
-            .replace("\\u003f", "?")
-            .replace("\\u002F", "/")
-            .replace("&amp;", "&")
-            .trimEnd('\\', '"', '\'', ',', ';', ')', ']', '}', '<')
-
-        if (!cleaned.startsWith("http", ignoreCase = true)) return null
-        if (cleaned.contains(mainUrl, ignoreCase = true)) return null
-        if (cleaned.contains("google-analytics", ignoreCase = true)) return null
-        if (cleaned.contains("googletagmanager", ignoreCase = true)) return null
-        if (cleaned.contains("facebook.com", ignoreCase = true)) return null
-        if (cleaned.contains("twitter.com", ignoreCase = true)) return null
-        if (cleaned.contains("x.com", ignoreCase = true)) return null
-        if (cleaned.contains(".css", ignoreCase = true)) return null
-        if (cleaned.contains(".jpg", ignoreCase = true)) return null
-        if (cleaned.contains(".jpeg", ignoreCase = true)) return null
-        if (cleaned.contains(".png", ignoreCase = true)) return null
-        if (cleaned.contains(".webp", ignoreCase = true)) return null
-        if (cleaned.contains(".gif", ignoreCase = true)) return null
-        if (cleaned.contains(".ico", ignoreCase = true)) return null
-        if (cleaned.contains(".svg", ignoreCase = true)) return null
-        if (cleaned.contains(".woff", ignoreCase = true)) return null
-        if (cleaned.contains(".ttf", ignoreCase = true)) return null
-
-        return cleaned
-    }
-
-    private fun collectAllUrls(document: Document): LinkedHashSet<String> {
-        val urls = linkedSetOf<String>()
-
-        document
-            .select("iframe[src], a[href], source[src], video[src], embed[src], object[data]")
-            .forEach { element ->
-                listOf("src", "href", "data").forEach { attrName ->
-                    cleanFoundUrl(element.attr(attrName))?.let { urls.add(it) }
-                }
-            }
-
-        val html = document.html()
-            .replace("\\/", "/")
-            .replace("\\u0026", "&")
-            .replace("\\u003d", "=")
-            .replace("\\u003f", "?")
-            .replace("\\u002F", "/")
-            .replace("&amp;", "&")
-
-        Regex("""https?://[^\s"'<>]+""")
-            .findAll(html)
-            .mapNotNull { cleanFoundUrl(it.value) }
-            .forEach { urls.add(it) }
-
-        return urls
-    }
-
     private suspend fun safeLoadExtractor(
         url: String,
         referer: String,
@@ -359,62 +299,6 @@ class AnichinV2 : MainAPI() {
         }
     }
 
-    private suspend fun deepScanPage(
-        pageUrl: String,
-        referer: String,
-        loadedUrls: MutableSet<String>,
-        scannedPages: MutableSet<String>,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit,
-        depth: Int
-    ) {
-        if (depth > 2) return
-        if (!scannedPages.add(pageUrl)) return
-
-        val pageDocument = runCatching {
-            app.get(
-                pageUrl,
-                headers = mapOf(
-                    "Referer" to referer,
-                    "Origin" to mainUrl,
-                    "User-Agent" to USER_AGENT
-                )
-            ).document
-        }.getOrNull() ?: return
-
-        val foundUrls = collectAllUrls(pageDocument)
-
-        foundUrls.forEach { foundUrl ->
-            safeLoadExtractor(
-                foundUrl,
-                pageUrl,
-                loadedUrls,
-                subtitleCallback,
-                callback
-            )
-        }
-
-        foundUrls
-            .take(15)
-            .forEach { nextUrl ->
-                if (
-                    !isFastVideoHost(nextUrl) &&
-                    !nextUrl.contains(".mp4", ignoreCase = true) &&
-                    !nextUrl.contains(".m3u8", ignoreCase = true)
-                ) {
-                    deepScanPage(
-                        nextUrl,
-                        pageUrl,
-                        loadedUrls,
-                        scannedPages,
-                        subtitleCallback,
-                        callback,
-                        depth + 1
-                    )
-                }
-            }
-    }
-
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -425,12 +309,14 @@ class AnichinV2 : MainAPI() {
         val episodeUrl = fixUrl(data)
         val document = app.get(episodeUrl).document
         val loadedUrls = mutableSetOf<String>()
-        val scannedPages = mutableSetOf<String>()
+        val secondScanCandidates = linkedMapOf<String, String>()
 
-        val fastCandidates = linkedMapOf<String, String>()
-        val deepCandidates = linkedMapOf<String, String>()
-        val wrapperUrls = linkedSetOf<String>()
-
+        /*
+         * Scan 1:
+         * Immediate fast scan.
+         * OkRu, Odnoklassniki and Rumble are loaded as soon as they are found.
+         * This part must stay light so playback can start faster.
+         */
         document.select(".mobius option").forEach optionLoop@ { option ->
 
             val encodedValue = option.attr("value").trim()
@@ -440,18 +326,25 @@ class AnichinV2 : MainAPI() {
                 Jsoup.parse(base64Decode(encodedValue))
             }.getOrNull() ?: return@optionLoop
 
-            val streamUrl = decodedDocument
+            val iframeUrl = decodedDocument
                 .selectFirst("iframe[src]")
                 ?.attr("src")
                 ?.trim()
-                ?.takeIf { it.isNotBlank() }
-                ?.let { fixUrl(it) }
-                ?: return@optionLoop
+                .orEmpty()
 
-            wrapperUrls.add(streamUrl)
+            if (iframeUrl.isBlank()) return@optionLoop
+
+            val streamUrl = fixUrl(iframeUrl)
 
             if (isFastVideoHost(streamUrl)) {
-                fastCandidates[streamUrl] = episodeUrl
+                safeLoadExtractor(
+                    streamUrl,
+                    episodeUrl,
+                    loadedUrls,
+                    subtitleCallback,
+                    callback
+                )
+                return@optionLoop
             }
 
             val streamDocument = runCatching {
@@ -465,7 +358,7 @@ class AnichinV2 : MainAPI() {
                 ).document
             }.getOrNull() ?: return@optionLoop
 
-            streamDocument
+            val playerUrls = streamDocument
                 .select("iframe[src]")
                 .mapNotNull { iframe ->
                     iframe.attr("src")
@@ -474,111 +367,82 @@ class AnichinV2 : MainAPI() {
                         ?.let { fixUrl(it) }
                 }
                 .distinct()
-                .forEach { playerUrl ->
 
-                    wrapperUrls.add(playerUrl)
-                    deepCandidates[playerUrl] = streamUrl
+            playerUrls.forEach playerLoop@ { playerUrl ->
 
-                    if (isFastVideoHost(playerUrl)) {
-                        fastCandidates[playerUrl] = streamUrl
+                if (isFastVideoHost(playerUrl)) {
+                    safeLoadExtractor(
+                        playerUrl,
+                        streamUrl,
+                        loadedUrls,
+                        subtitleCallback,
+                        callback
+                    )
+                    return@playerLoop
+                }
+
+                secondScanCandidates[playerUrl] = streamUrl
+
+                /*
+                 * One light nested check only.
+                 * This keeps the old fast behavior for OkRu/Rumble hidden inside one wrapper.
+                 * Non-fast nested URLs are saved for Scan 2, not extracted here.
+                 */
+                val nestedDocument = runCatching {
+                    app.get(
+                        playerUrl,
+                        headers = mapOf(
+                            "Referer" to streamUrl,
+                            "User-Agent" to USER_AGENT
+                        )
+                    ).document
+                }.getOrNull() ?: return@playerLoop
+
+                nestedDocument
+                    .select("iframe[src]")
+                    .mapNotNull { nested ->
+                        nested.attr("src")
+                            .trim()
+                            .takeIf { it.isNotBlank() }
+                            ?.let { fixUrl(it) }
                     }
+                    .distinct()
+                    .forEach nestedLoop@ { nestedUrl ->
 
-                    val nestedDocument = runCatching {
-                        app.get(
-                            playerUrl,
-                            headers = mapOf(
-                                "Referer" to streamUrl,
-                                "User-Agent" to USER_AGENT
+                        if (isFastVideoHost(nestedUrl)) {
+                            safeLoadExtractor(
+                                nestedUrl,
+                                playerUrl,
+                                loadedUrls,
+                                subtitleCallback,
+                                callback
                             )
-                        ).document
-                    }.getOrNull()
-
-                    nestedDocument
-                        ?.select("iframe[src]")
-                        ?.mapNotNull { nested ->
-                            nested.attr("src")
-                                .trim()
-                                .takeIf { it.isNotBlank() }
-                                ?.let { fixUrl(it) }
-                        }
-                        ?.distinct()
-                        ?.forEach { nestedUrl ->
-                            wrapperUrls.add(nestedUrl)
-                            deepCandidates[nestedUrl] = playerUrl
-
-                            if (isFastVideoHost(nestedUrl)) {
-                                fastCandidates[nestedUrl] = playerUrl
-                            }
+                            return@nestedLoop
                         }
 
-                    nestedDocument
-                        ?.let { collectAllUrls(it) }
-                        ?.forEach { foundUrl ->
-                            wrapperUrls.add(foundUrl)
-                            deepCandidates[foundUrl] = playerUrl
-
-                            if (isFastVideoHost(foundUrl)) {
-                                fastCandidates[foundUrl] = playerUrl
-                            }
-                        }
-                }
-
-            collectAllUrls(streamDocument).forEach { foundUrl ->
-                wrapperUrls.add(foundUrl)
-                deepCandidates[foundUrl] = streamUrl
-
-                if (isFastVideoHost(foundUrl)) {
-                    fastCandidates[foundUrl] = streamUrl
-                }
+                        secondScanCandidates[nestedUrl] = playerUrl
+                    }
             }
         }
 
         /*
-         * Scan 1:
-         * Load OkRu, Odnoklassniki and Rumble first.
-         */
-        fastCandidates.forEach { (url, referer) ->
-            safeLoadExtractor(
-                url,
-                referer,
-                loadedUrls,
-                subtitleCallback,
-                callback
-            )
-        }
-
-        /*
          * Scan 2:
-         * Same idea as AnichinX.
-         * Load every player iframe directly with no host filter.
-         * This is the part that should bring Dood, StreamRuby and other supported extractors back.
+         * Direct player scan only.
+         * No deep crawling, no raw HTML crawling, no background coroutine.
+         * This follows the working AnichinX style that brings back Dood and StreamRuby.
          */
-        deepCandidates.forEach { (url, referer) ->
-            safeLoadExtractor(
-                url,
-                referer,
-                loadedUrls,
-                subtitleCallback,
-                callback
-            )
-        }
-
-        /*
-         * Scan 3:
-         * Extra deep scan.
-         * Try all external URLs found inside wrapper pages.
-         */
-        wrapperUrls.take(40).forEach { wrapperUrl ->
-            deepScanPage(
-                wrapperUrl,
-                episodeUrl,
-                loadedUrls,
-                scannedPages,
-                subtitleCallback,
-                callback,
-                1
-            )
-        }
+        secondScanCandidates
+            .entries
+            .take(12)
+            .forEach { (url, referer) ->
+                safeLoadExtractor(
+                    url,
+                    referer,
+                    loadedUrls,
+                    subtitleCallback,
+                    callback
+                )
+            }
 
         return true
     }
