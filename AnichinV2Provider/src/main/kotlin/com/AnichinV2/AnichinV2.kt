@@ -309,14 +309,13 @@ class AnichinV2 : MainAPI() {
         val episodeUrl = fixUrl(data)
         val document = app.get(episodeUrl).document
         val loadedUrls = mutableSetOf<String>()
-        val streamUrls = linkedSetOf<String>()
         val secondScanCandidates = linkedMapOf<String, String>()
 
         /*
-         * Scan 1A:
-         * Decode all server values first.
-         * If OkRu, Odnoklassniki or Rumble is already direct in base64 iframe,
-         * load it immediately without opening other wrappers first.
+         * Scan 1:
+         * Immediate fast scan.
+         * OkRu, Odnoklassniki and Rumble are loaded as soon as they are found.
+         * This part must stay light so playback can start faster.
          */
         document.select(".mobius option").forEach optionLoop@ { option ->
 
@@ -345,18 +344,8 @@ class AnichinV2 : MainAPI() {
                     subtitleCallback,
                     callback
                 )
-            } else {
-                streamUrls.add(streamUrl)
+                return@optionLoop
             }
-        }
-
-        /*
-         * Scan 1B:
-         * Light wrapper scan only.
-         * Find OkRu, Odnoklassniki and Rumble inside first iframe wrapper.
-         * Do not open nested wrappers here because that slows the first playable result.
-         */
-        streamUrls.forEach streamLoop@ { streamUrl ->
 
             val streamDocument = runCatching {
                 app.get(
@@ -367,9 +356,9 @@ class AnichinV2 : MainAPI() {
                         "User-Agent" to USER_AGENT
                     )
                 ).document
-            }.getOrNull() ?: return@streamLoop
+            }.getOrNull() ?: return@optionLoop
 
-            streamDocument
+            val playerUrls = streamDocument
                 .select("iframe[src]")
                 .mapNotNull { iframe ->
                     iframe.attr("src")
@@ -378,28 +367,69 @@ class AnichinV2 : MainAPI() {
                         ?.let { fixUrl(it) }
                 }
                 .distinct()
-                .forEach { playerUrl ->
 
-                    if (isFastVideoHost(playerUrl)) {
-                        safeLoadExtractor(
-                            playerUrl,
-                            streamUrl,
-                            loadedUrls,
-                            subtitleCallback,
-                            callback
-                        )
-                    } else {
-                        secondScanCandidates[playerUrl] = streamUrl
-                    }
+            playerUrls.forEach playerLoop@ { playerUrl ->
+
+                if (isFastVideoHost(playerUrl)) {
+                    safeLoadExtractor(
+                        playerUrl,
+                        streamUrl,
+                        loadedUrls,
+                        subtitleCallback,
+                        callback
+                    )
+                    return@playerLoop
                 }
+
+                secondScanCandidates[playerUrl] = streamUrl
+
+                /*
+                 * One light nested check only.
+                 * This keeps the old fast behavior for OkRu/Rumble hidden inside one wrapper.
+                 * Non-fast nested URLs are saved for Scan 2, not extracted here.
+                 */
+                val nestedDocument = runCatching {
+                    app.get(
+                        playerUrl,
+                        headers = mapOf(
+                            "Referer" to streamUrl,
+                            "User-Agent" to USER_AGENT
+                        )
+                    ).document
+                }.getOrNull() ?: return@playerLoop
+
+                nestedDocument
+                    .select("iframe[src]")
+                    .mapNotNull { nested ->
+                        nested.attr("src")
+                            .trim()
+                            .takeIf { it.isNotBlank() }
+                            ?.let { fixUrl(it) }
+                    }
+                    .distinct()
+                    .forEach nestedLoop@ { nestedUrl ->
+
+                        if (isFastVideoHost(nestedUrl)) {
+                            safeLoadExtractor(
+                                nestedUrl,
+                                playerUrl,
+                                loadedUrls,
+                                subtitleCallback,
+                                callback
+                            )
+                            return@nestedLoop
+                        }
+
+                        secondScanCandidates[nestedUrl] = playerUrl
+                    }
+            }
         }
 
         /*
          * Scan 2:
-         * Direct player scan.
-         * Same simple idea as AnichinX.
-         * This keeps Dood, StreamRuby and other supported extractors,
-         * but it runs after Scan 1A and Scan 1B are already done.
+         * Direct player scan only.
+         * No deep crawling, no raw HTML crawling, no background coroutine.
+         * This follows the working AnichinX style that brings back Dood and StreamRuby.
          */
         secondScanCandidates
             .entries
