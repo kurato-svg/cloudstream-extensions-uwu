@@ -2,6 +2,9 @@ package com.AnichinV2
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -284,8 +287,11 @@ class AnichinV2 : MainAPI() {
             .trim()
             .replace("\\/", "/")
             .replace("\\u0026", "&")
+            .replace("\\u003d", "=")
+            .replace("\\u003f", "?")
+            .replace("\\u002F", "/")
             .replace("&amp;", "&")
-            .trimEnd('\\', '"', '\'', ',', ';', ')', ']', '}')
+            .trimEnd('\\', '"', '\'', ',', ';', ')', ']', '}', '<')
 
         if (!cleaned.startsWith("http", ignoreCase = true)) return null
         if (cleaned.contains(mainUrl, ignoreCase = true)) return null
@@ -295,7 +301,6 @@ class AnichinV2 : MainAPI() {
         if (cleaned.contains("twitter.com", ignoreCase = true)) return null
         if (cleaned.contains("x.com", ignoreCase = true)) return null
         if (cleaned.contains(".css", ignoreCase = true)) return null
-        if (cleaned.contains(".js", ignoreCase = true)) return null
         if (cleaned.contains(".jpg", ignoreCase = true)) return null
         if (cleaned.contains(".jpeg", ignoreCase = true)) return null
         if (cleaned.contains(".png", ignoreCase = true)) return null
@@ -303,6 +308,8 @@ class AnichinV2 : MainAPI() {
         if (cleaned.contains(".gif", ignoreCase = true)) return null
         if (cleaned.contains(".ico", ignoreCase = true)) return null
         if (cleaned.contains(".svg", ignoreCase = true)) return null
+        if (cleaned.contains(".woff", ignoreCase = true)) return null
+        if (cleaned.contains(".ttf", ignoreCase = true)) return null
 
         return cleaned
     }
@@ -318,8 +325,16 @@ class AnichinV2 : MainAPI() {
                 }
             }
 
-        Regex("""https?:\\/\\/[^\s"'<>]+""")
-            .findAll(document.html())
+        val html = document.html()
+            .replace("\\/", "/")
+            .replace("\\u0026", "&")
+            .replace("\\u003d", "=")
+            .replace("\\u003f", "?")
+            .replace("\\u002F", "/")
+            .replace("&amp;", "&")
+
+        Regex("""https?://[^\s"'<>]+""")
+            .findAll(html)
             .mapNotNull { cleanFoundUrl(it.value) }
             .forEach { urls.add(it) }
 
@@ -347,6 +362,62 @@ class AnichinV2 : MainAPI() {
         }
     }
 
+    private suspend fun deepScanPage(
+        pageUrl: String,
+        referer: String,
+        loadedUrls: MutableSet<String>,
+        scannedPages: MutableSet<String>,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+        depth: Int
+    ) {
+        if (depth > 3) return
+        if (!scannedPages.add(pageUrl)) return
+
+        val pageDocument = runCatching {
+            app.get(
+                pageUrl,
+                headers = mapOf(
+                    "Referer" to referer,
+                    "Origin" to mainUrl,
+                    "User-Agent" to USER_AGENT
+                )
+            ).document
+        }.getOrNull() ?: return
+
+        val foundUrls = collectAllUrls(pageDocument)
+
+        foundUrls.forEach { foundUrl ->
+            safeLoadExtractor(
+                foundUrl,
+                pageUrl,
+                loadedUrls,
+                subtitleCallback,
+                callback
+            )
+        }
+
+        foundUrls
+            .take(25)
+            .forEach { nextUrl ->
+                if (
+                    !isFastVideoHost(nextUrl) &&
+                    !nextUrl.contains(".mp4", ignoreCase = true) &&
+                    !nextUrl.contains(".m3u8", ignoreCase = true)
+                ) {
+                    deepScanPage(
+                        nextUrl,
+                        pageUrl,
+                        loadedUrls,
+                        scannedPages,
+                        subtitleCallback,
+                        callback,
+                        depth + 1
+                    )
+                }
+            }
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -362,7 +433,7 @@ class AnichinV2 : MainAPI() {
         /*
          * Scan 1:
          * Fast scan only.
-         * Load OkRu, Odnoklassniki and Rumble first so video can start quickly.
+         * Load OkRu, Odnoklassniki and Rumble first.
          */
         document.select(".mobius option").forEach optionLoop@ { option ->
 
@@ -438,6 +509,10 @@ class AnichinV2 : MainAPI() {
                         ).document
                     }.getOrNull() ?: return@iframeLoop
 
+                    collectAllUrls(nestedDocument).forEach { nestedFoundUrl ->
+                        wrapperUrls.add(nestedFoundUrl)
+                    }
+
                     nestedDocument
                         .select("iframe[src]")
                         .forEach nestedLoop@ { nested ->
@@ -464,30 +539,22 @@ class AnichinV2 : MainAPI() {
 
         /*
          * Scan 2:
-         * Deep scan without host whitelist.
-         * Try all external URLs found from wrapper pages.
-         * CloudStream extractor decides which URL is valid.
+         * Background deep scan.
+         * No host whitelist.
+         * Try all external URLs and follow wrapper pages up to 3 levels.
          */
-        wrapperUrls.forEach wrapperLoop@ { wrapperUrl ->
+        CoroutineScope(Dispatchers.IO).launch {
+            val scannedPages = mutableSetOf<String>()
 
-            val wrapperDocument = runCatching {
-                app.get(
+            wrapperUrls.forEach { wrapperUrl ->
+                deepScanPage(
                     wrapperUrl,
-                    headers = mapOf(
-                        "Referer" to episodeUrl,
-                        "Origin" to mainUrl,
-                        "User-Agent" to USER_AGENT
-                    )
-                ).document
-            }.getOrNull() ?: return@wrapperLoop
-
-            collectAllUrls(wrapperDocument).forEach { foundUrl ->
-                safeLoadExtractor(
-                    foundUrl,
-                    wrapperUrl,
+                    episodeUrl,
                     loadedUrls,
+                    scannedPages,
                     subtitleCallback,
-                    callback
+                    callback,
+                    1
                 )
             }
         }
