@@ -2,9 +2,6 @@ package com.AnichinV2
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -371,7 +368,7 @@ class AnichinV2 : MainAPI() {
         callback: (ExtractorLink) -> Unit,
         depth: Int
     ) {
-        if (depth > 3) return
+        if (depth > 2) return
         if (!scannedPages.add(pageUrl)) return
 
         val pageDocument = runCatching {
@@ -398,7 +395,7 @@ class AnichinV2 : MainAPI() {
         }
 
         foundUrls
-            .take(25)
+            .take(15)
             .forEach { nextUrl ->
                 if (
                     !isFastVideoHost(nextUrl) &&
@@ -428,13 +425,12 @@ class AnichinV2 : MainAPI() {
         val episodeUrl = fixUrl(data)
         val document = app.get(episodeUrl).document
         val loadedUrls = mutableSetOf<String>()
+        val scannedPages = mutableSetOf<String>()
+
+        val fastCandidates = linkedMapOf<String, String>()
+        val deepCandidates = linkedMapOf<String, String>()
         val wrapperUrls = linkedSetOf<String>()
 
-        /*
-         * Scan 1:
-         * Fast scan only.
-         * Load OkRu, Odnoklassniki and Rumble first.
-         */
         document.select(".mobius option").forEach optionLoop@ { option ->
 
             val encodedValue = option.attr("value").trim()
@@ -444,26 +440,18 @@ class AnichinV2 : MainAPI() {
                 Jsoup.parse(base64Decode(encodedValue))
             }.getOrNull() ?: return@optionLoop
 
-            val firstIframe = decodedDocument
+            val streamUrl = decodedDocument
                 .selectFirst("iframe[src]")
                 ?.attr("src")
                 ?.trim()
-                .orEmpty()
+                ?.takeIf { it.isNotBlank() }
+                ?.let { fixUrl(it) }
+                ?: return@optionLoop
 
-            if (firstIframe.isBlank()) return@optionLoop
-
-            val streamUrl = fixUrl(firstIframe)
             wrapperUrls.add(streamUrl)
 
             if (isFastVideoHost(streamUrl)) {
-                safeLoadExtractor(
-                    streamUrl,
-                    episodeUrl,
-                    loadedUrls,
-                    subtitleCallback,
-                    callback
-                )
-                return@optionLoop
+                fastCandidates[streamUrl] = episodeUrl
             }
 
             val streamDocument = runCatching {
@@ -479,24 +467,20 @@ class AnichinV2 : MainAPI() {
 
             streamDocument
                 .select("iframe[src]")
-                .forEach iframeLoop@ { iframe ->
+                .mapNotNull { iframe ->
+                    iframe.attr("src")
+                        .trim()
+                        .takeIf { it.isNotBlank() }
+                        ?.let { fixUrl(it) }
+                }
+                .distinct()
+                .forEach { playerUrl ->
 
-                    val playerUrl = fixUrl(
-                        iframe.attr("src").trim()
-                    )
-
-                    if (playerUrl.isBlank()) return@iframeLoop
                     wrapperUrls.add(playerUrl)
+                    deepCandidates[playerUrl] = streamUrl
 
                     if (isFastVideoHost(playerUrl)) {
-                        safeLoadExtractor(
-                            playerUrl,
-                            streamUrl,
-                            loadedUrls,
-                            subtitleCallback,
-                            callback
-                        )
-                        return@iframeLoop
+                        fastCandidates[playerUrl] = streamUrl
                     }
 
                     val nestedDocument = runCatching {
@@ -507,56 +491,93 @@ class AnichinV2 : MainAPI() {
                                 "User-Agent" to USER_AGENT
                             )
                         ).document
-                    }.getOrNull() ?: return@iframeLoop
-
-                    collectAllUrls(nestedDocument).forEach { nestedFoundUrl ->
-                        wrapperUrls.add(nestedFoundUrl)
-                    }
+                    }.getOrNull()
 
                     nestedDocument
-                        .select("iframe[src]")
-                        .forEach nestedLoop@ { nested ->
-
-                            val nestedUrl = fixUrl(
-                                nested.attr("src").trim()
-                            )
-
-                            if (nestedUrl.isBlank()) return@nestedLoop
+                        ?.select("iframe[src]")
+                        ?.mapNotNull { nested ->
+                            nested.attr("src")
+                                .trim()
+                                .takeIf { it.isNotBlank() }
+                                ?.let { fixUrl(it) }
+                        }
+                        ?.distinct()
+                        ?.forEach { nestedUrl ->
                             wrapperUrls.add(nestedUrl)
+                            deepCandidates[nestedUrl] = playerUrl
 
                             if (isFastVideoHost(nestedUrl)) {
-                                safeLoadExtractor(
-                                    nestedUrl,
-                                    playerUrl,
-                                    loadedUrls,
-                                    subtitleCallback,
-                                    callback
-                                )
+                                fastCandidates[nestedUrl] = playerUrl
+                            }
+                        }
+
+                    nestedDocument
+                        ?.let { collectAllUrls(it) }
+                        ?.forEach { foundUrl ->
+                            wrapperUrls.add(foundUrl)
+                            deepCandidates[foundUrl] = playerUrl
+
+                            if (isFastVideoHost(foundUrl)) {
+                                fastCandidates[foundUrl] = playerUrl
                             }
                         }
                 }
+
+            collectAllUrls(streamDocument).forEach { foundUrl ->
+                wrapperUrls.add(foundUrl)
+                deepCandidates[foundUrl] = streamUrl
+
+                if (isFastVideoHost(foundUrl)) {
+                    fastCandidates[foundUrl] = streamUrl
+                }
+            }
+        }
+
+        /*
+         * Scan 1:
+         * Load OkRu, Odnoklassniki and Rumble first.
+         */
+        fastCandidates.forEach { (url, referer) ->
+            safeLoadExtractor(
+                url,
+                referer,
+                loadedUrls,
+                subtitleCallback,
+                callback
+            )
         }
 
         /*
          * Scan 2:
-         * Background deep scan.
-         * No host whitelist.
-         * Try all external URLs and follow wrapper pages up to 3 levels.
+         * Same idea as AnichinX.
+         * Load every player iframe directly with no host filter.
+         * This is the part that should bring Dood, StreamRuby and other supported extractors back.
          */
-        CoroutineScope(Dispatchers.IO).launch {
-            val scannedPages = mutableSetOf<String>()
+        deepCandidates.forEach { (url, referer) ->
+            safeLoadExtractor(
+                url,
+                referer,
+                loadedUrls,
+                subtitleCallback,
+                callback
+            )
+        }
 
-            wrapperUrls.forEach { wrapperUrl ->
-                deepScanPage(
-                    wrapperUrl,
-                    episodeUrl,
-                    loadedUrls,
-                    scannedPages,
-                    subtitleCallback,
-                    callback,
-                    1
-                )
-            }
+        /*
+         * Scan 3:
+         * Extra deep scan.
+         * Try all external URLs found inside wrapper pages.
+         */
+        wrapperUrls.take(40).forEach { wrapperUrl ->
+            deepScanPage(
+                wrapperUrl,
+                episodeUrl,
+                loadedUrls,
+                scannedPages,
+                subtitleCallback,
+                callback,
+                1
+            )
         }
 
         return true
